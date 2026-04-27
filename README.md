@@ -1,44 +1,46 @@
 # smartvideo
 
-## 项目概述
+**English** | [简体中文](README.zh-CN.md)
 
-**smartvideo** 是一套面向**品牌广告视频**的自动化管线。用户只需提供一段**品牌 / 产品 brief**（纯文本），系统会串联多步大模型与媒体处理，在流程末尾输出**最终成片在磁盘上的路径**；中间产物与成片默认写入 `outputs/`（可用环境变量 `SMARTVIDEO_ARTIFACTS_DIR` 调整根目录）。
+## Overview
 
-**主要能力：**
+**smartvideo** is an automated pipeline for **brand advertising video**. You provide a **brand / product brief** (plain text); the system chains LLM and media steps and, at the end, prints the **on-disk path to the final video**. Intermediate artifacts and the final file default to `outputs/` (override the root with `SMARTVIDEO_ARTIFACTS_DIR` if needed).
 
-1. **分镜与叙事规划**  
-   结合项目内 **`skills/` 下的 SKILL.md**（分镜模板、世界观约束等），由 LLM 将 brief 落为结构化分镜、场景与镜头级描述，为视频与旁白提供依据。
+**What it does:**
 
-2. **品牌信息**  
-   从 brief 中抽取 / 整理**品牌画像**；在配置允许时，还可进行**联网调研**（具体策略与工具由 `BRAND_RESEARCH_STRATEGY` 等环境变量与代码路径控制），使内容更贴品牌与事实。
+1. **Storyboard & narrative**  
+   With **`skills/** SKILL.md** files (storyboard template, world constraints, etc.), an LLM turns the brief into structured storyboards, scenes, and shot-level detail for video and voiceover.
 
-3. **视频片段生成**  
-   按场景调用**可插拔的视频提供方**（如占位、OpenAI 兼容的异步视频 API、或自定义 HTTP 网关），生成各段视频素材；重试、超时与回退等由 `VIDEO_*` 及实现代码共同约束。
+2. **Brand context**  
+   Extracts and organizes a **brand profile** from the brief. When enabled, it can also run **web research** (strategy and tools are controlled by env vars like `BRAND_RESEARCH_STRATEGY` and related code paths) for better fit with the brand and facts.
 
-4. **音画后期**  
-   可选**旁白 TTS**、分镜**音效（SFX）**、成片**BGM** 与响度 / ducking 等，在拼接前为单段与全片配好音轨或做基础母带感处理，详见 `.env.example` 中的 `AUDIO_*`。
+3. **Video clips**  
+   Per-scene, **pluggable video providers** (placeholder, OpenAI-style async video API, or a custom HTTP gateway) generate clip assets. Retries, timeouts, and fallbacks are governed by `VIDEO_*` and the implementations.
 
-5. **成片输出**  
-   使用本机 **FFmpeg** 将多段视频与音轨**拼接 / 合成**为最终文件；全链路成功时，命令行在**标准输出**中打印**最终视频路径**。
+4. **Audio post**  
+   Optional **TTS voiceover**, per-shot **SFX**, final **BGM**, loudness / ducking, and similar processing before the final stitch. See `AUDIO_*` in `.env.example`.
 
-6. **复跑与增量**  
-   在已有 `scenes.json` 等产物时，可用 **`smartvideo-remake`** 只重跑**视频 → 音频 → 拼接**，避免从头重跑大模型各节点，便于更换视频后端或调参。
+5. **Final render**  
+   **FFmpeg** on the host **muxes / stitches** clips and audio into one file. On success, the CLI prints the **final video path** to **stdout**.
 
-**使用方式（摘要）：** 配置好 `.env`（至少 `OPENAI_API_KEY` 等，见下节）后，通过 `smartvideo "你的 brief"` 或 `python -m app.run` 一次跑完全链路；需要时用 `smartvideo-remake` 做局部重算。完整命令与说明见后文「使用」。
+6. **Reruns**  
+   When you already have `scenes.json` (or a prior run’s artifacts), **`smartvideo-remake`** reruns only **video → audio → stitch**, skipping the heavy LLM steps—useful when switching backends or tuning parameters.
 
-## 功能概览（速查）
+**Usage (summary):** Configure `.env` (at least `OPENAI_API_KEY`; see below), then run `smartvideo "your brief"` or `python -m app.run` for a full pass; use `smartvideo-remake` for partial reruns. See **Usage** below for full commands.
 
-- **工作流**（`app/graph/graph.py`）：加载技能 → 品牌画像 → 分镜与约束（LLM + skills）→ 场景列表 → 视频 → 音频 → 拼接成片。
-- **视频提供方**：`placeholder`（占位）、`openai_videos`（OpenAI 兼容异步视频 API）、`http`（通用 HTTP 网关），见环境变量 `VIDEO_*`。
-- **音频**：TTS 旁白、分镜 SFX、最终 BGM 与响度/ducking 等，见 `.env.example` 中 `AUDIO_*`。
-- **复跑片段**（不重复跑 LLM）：`smartvideo-remake` 从已保存的 `scenes.json` 或某次 `outputs/<run_id>` 仅重跑视频/音频/拼接。
+## Quick reference
 
-## 环境要求
+- **Graph** (`app/graph/graph.py`): load skills → brand → storyboard + constraints (LLM + skills) → scenes → video → audio → stitch.
+- **Video providers**: `placeholder`, `openai_videos` (OpenAI-compatible async video API), `http` (generic HTTP gateway). See `VIDEO_*`.
+- **Audio**: TTS, per-shot SFX, BGM, loudness/ducking. See `AUDIO_*` in `.env.example`.
+- **Reruns** (no LLM): `smartvideo-remake` from a saved `scenes.json` or `outputs/<run_id>` to rerun only video/audio/stitch.
+
+## Requirements
 
 - **Python** ≥ 3.11
-- **FFmpeg**：拼接与音画处理需要本机可执行 `ffmpeg`；仓库内附带 Windows 用 `.tools/ffmpeg-*` 可选作本地路径（若你在代码里指向该 bin）。
+- **FFmpeg**: the `ffmpeg` binary must be on `PATH` for stitching and A/V work. A Windows build under `.tools/ffmpeg-*` is included if you point your setup at that `bin` directory.
 
-## 安装
+## Install
 
 ```bash
 python -m venv .venv
@@ -50,65 +52,65 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-从项目根复制环境变量模板并编辑：
+Copy the env template from the project root and edit it:
 
 ```bash
 copy .env.example .env
-# 或: cp .env.example .env
+# or: cp .env.example .env
 ```
 
-至少设置 **`OPENAI_API_KEY`**；若使用非官方 OpenAI 端点，设置 **`OPENAI_BASE_URL`**（通常含 `/v1`）及 **`OPENAI_MODEL`**。其余变量见 `.env.example` 内注释（视频、音频、技能目录、产物目录等）。
+Set at least **`OPENAI_API_KEY`**. For a non-OpenAI-compatible gateway, set **`OPENAI_BASE_URL`** (usually including `/v1`) and **`OPENAI_MODEL`**. All other options are documented in `.env.example` (video, audio, skills path, artifacts directory, etc.).
 
-## 使用
+## Usage
 
-**命令行入口**（`pyproject.toml` 中已注册）：
+**CLI entry points** (registered in `pyproject.toml`):
 
 ```bash
-smartvideo "你的品牌与产品描述（brief）"
+smartvideo "Your brand and product brief"
 ```
 
-或：
+or:
 
 ```bash
-python -m app.run "你的品牌与产品描述"
+python -m app.run "Your brand and product brief"
 ```
 
-也可通过 **stdin** 传入 brief；成功时标准输出为最终成片路径。
+You can also pass the brief via **stdin**; on success, **stdout** is the final video path.
 
-**仅根据已有分镜重跑视频/音画/合成**（示例）：
+**Rerun only video / audio / stitch** from an existing storyboard (examples):
 
 ```bash
 smartvideo-remake path/to/scenes.json
-# 或指向某次 run 目录（内含 scenes.json）
+# or point at a run directory that contains scenes.json
 smartvideo-remake outputs/<run_id>
 ```
 
-具体参数以 `smartvideo-remake --help` 为准。
+Run `smartvideo-remake --help` for all flags.
 
-## 技能与配置
+## Skills & configuration
 
-- 默认可从环境变量 **`SMARTVIDEO_SKILLS_ROOT`** 指定技能根目录（默认项目下 `skills/`），内含分镜模板、世界观约束等 **SKILL.md**。
-- 品牌联网调研相关可通过 **`BRAND_RESEARCH_STRATEGY`** 等调整（见 `app/config.py`）。
+- **`SMARTVIDEO_SKILLS_ROOT`** points to the skills root (default: `./skills/`), including **SKILL.md** for storyboard template and world constraints.
+- **Brand research** is tuned with **`BRAND_RESEARCH_STRATEGY`** and related settings (see `app/config.py`).
 
-## 开发与测试
+## Development & tests
 
 ```bash
 pytest
 ```
 
-可选使用 **ruff** 做风格检查（见 `pyproject.toml` 中 `[tool.ruff]`）。
+**ruff** is optional for linting (see `[tool.ruff]` in `pyproject.toml`).
 
-## 项目结构（简要）
+## Repository layout
 
-| 路径 | 说明 |
+| Path | Description |
 | --- | --- |
-| `app/graph/` | LangGraph 状态与各节点（品牌、分镜、场景、视频、音频、拼接） |
-| `app/providers/` | 视频提供方实现 |
-| `app/media/` | FFmpeg 等媒体封装 |
-| `skills/` | 外部 SKILL 提示与模板 |
-| `tests/` | 单元与冒烟测试 |
-| `outputs/` | 运行产物（默认，可通过 `SMARTVIDEO_ARTIFACTS_DIR` 改） |
+| `app/graph/` | LangGraph state and nodes (brand, storyboard, scenes, video, audio, stitch) |
+| `app/providers/` | Video provider implementations |
+| `app/media/` | FFmpeg and media helpers |
+| `skills/` | External SKILL prompts and templates |
+| `tests/` | Unit and smoke tests |
+| `outputs/` | Run outputs (default; override with `SMARTVIDEO_ARTIFACTS_DIR`) |
 
-## 许可证
+## License
 
-本仓库未附带许可证文件时，使用与分发前请自行补充并遵守相应条款。
+This repository may not include a `LICENSE` file. Add one and comply with it before you redistribute or use the project in production.
