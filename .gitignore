@@ -6,4 +6,5 @@ __pycache__/
 .ruff_cache/
 dist/
 *.mp4
+!docs/assets/*.mp4
 outputs/

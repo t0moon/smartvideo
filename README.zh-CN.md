@@ -2,6 +2,14 @@
 
 [English](README.md) | **简体中文**
 
+## 示例成片
+
+本示例对应本机一次运行中 **staged 成片**（`final.staged.mp4`，路径：`outputs/20260427_195844/final.staged.mp4`），已复制到仓库 `docs/assets/` 供浏览与下载。
+
+<video src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" controls width="100%"></video>
+
+[直接打开 / 下载 MP4](docs/assets/demo_final_staged_20260427.mp4)
+
 ## 项目概述
 
 **smartvideo** 是一套面向**品牌广告视频**的自动化管线。用户只需提供一段**品牌 / 产品 brief**（纯文本），系统会串联多步大模型与媒体处理，在流程末尾输出**最终成片在磁盘上的路径**；中间产物与成片默认写入 `outputs/`（可用环境变量 `SMARTVIDEO_ARTIFACTS_DIR` 调整根目录）。

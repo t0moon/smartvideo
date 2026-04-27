@@ -2,6 +2,14 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+## Demo
+
+Sample run (**staged** master before the final `final.mp4` pass): from local path `outputs/20260427_195844/final.staged.mp4`, stored in-repo as the following file.
+
+<video src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" controls width="100%"></video>
+
+[Direct link to the MP4 file](docs/assets/demo_final_staged_20260427.mp4)
+
 ## Overview
 
 **smartvideo** is an automated pipeline for **brand advertising video**. You provide a **brand / product brief** (plain text); the system chains LLM and media steps and, at the end, prints the **on-disk path to the final video**. Intermediate artifacts and the final file default to `outputs/` (override the root with `SMARTVIDEO_ARTIFACTS_DIR` if needed).
@@ -21,7 +29,7 @@
    Optional **TTS voiceover**, per-shot **SFX**, final **BGM**, loudness / ducking, and similar processing before the final stitch. See `AUDIO_*` in `.env.example`.
 
 5. **Final render**  
-   **FFmpeg** on the host **muxes / stitches** clips and audio into one file. On success, the CLI prints the **final video path** to **stdout**.
+   **FFmpeg** on the host **muxes / stitches** clips and audio into one file, and can hard-burn subtitles from narration (`SUBTITLE_*`). On success, the CLI prints the **final video path** to **stdout**.
 
 6. **Reruns**  
    When you already have `scenes.json` (or a prior run’s artifacts), **`smartvideo-remake`** reruns only **video → audio → stitch**, skipping the heavy LLM steps—useful when switching backends or tuning parameters.
@@ -77,6 +85,18 @@ python -m app.run "Your brand and product brief"
 
 You can also pass the brief via **stdin**; on success, **stdout** is the final video path.
 
+**Two-step approval flow** (generate storyboard first, continue after user confirmation):
+
+```bash
+# step 1: generate storyboard only (prints JSON payload with run_id/storyboard_script_path/storyboard_script)
+smartvideo --await-confirm "Your brand and product brief"
+
+# step 2: after user confirms, continue render in-place for that run
+smartvideo-remake outputs/<run_id> --in-place <run_id>
+# or directly from storyboard_script.json
+smartvideo-remake outputs/<run_id>/storyboard_script.json --in-place <run_id>
+```
+
 **Rerun only video / audio / stitch** from an existing storyboard (examples):
 
 ```bash
@@ -86,6 +106,15 @@ smartvideo-remake outputs/<run_id>
 ```
 
 Run `smartvideo-remake --help` for all flags.
+
+**Optional HTTP API** (for mobile/iPad or frontend integration):
+
+```bash
+smartvideo-api --host 0.0.0.0 --port 8787
+```
+
+- `POST /storyboard/generate` with JSON body `{"brief":"...", "require_confirmation": true}`
+- `POST /storyboard/confirm` with JSON body `{"run_id":"<run_id>", "in_place": true}`
 
 ## Skills & configuration
 
