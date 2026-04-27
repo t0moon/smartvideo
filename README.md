@@ -4,11 +4,27 @@
 
 ## Demo
 
-Sample run (**staged** master before the final `final.mp4` pass): from local path `outputs/20260427_195844/final.staged.mp4`, stored in-repo as the following file.
+Sample run (**staged** master before the final `final.mp4` pass): from local path `outputs/20260427_195844/final.staged.mp4`, stored in-repo as the files below.
 
-<video src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" controls width="100%"></video>
+GitHub’s README can only use the **browser’s built-in video controls** (no custom JavaScript players inside the README itself). For a **full-featured player** (Plyr: keyboard shortcuts, speed, better UI), open **[docs/demo-player.html](docs/demo-player.html)** in a new tab using one of these:
 
-[Direct link to the MP4 file](docs/assets/demo_final_staged_20260427.mp4)
+- [Open Plyr player (HTMLPreview)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/demo-player.html) (works without GitHub Pages)
+- After enabling **Settings → Pages** with the `docs` folder: `https://t0moon.github.io/smartvideo/demo-player.html`
+
+**Inline preview** (native controls + poster frame):
+
+<video
+  controls
+  playsinline
+  preload="metadata"
+  poster="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427_poster.jpg"
+  style="max-width:100%;border-radius:8px;background:#0d1117;"
+  width="100%">
+  <source src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" type="video/mp4" />
+  <p>Your browser does not support embedded video. <a href="docs/assets/demo_final_staged_20260427.mp4">Download the MP4</a> or use the Plyr link above.</p>
+</video>
+
+[Direct link to the MP4 file](docs/assets/demo_final_staged_20260427.mp4) · [Source for the web player](docs/demo-player.html)
 
 ## Overview
 

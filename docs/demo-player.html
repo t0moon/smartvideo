@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>smartvideo — demo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.css" />
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(160deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      color: #c9d1d9; padding: 1.5rem; box-sizing: border-box;
+    }
+    h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 0.5rem; letter-spacing: 0.02em; }
+    p.sub { font-size: 0.8rem; color: #8b949e; margin: 0 0 1.25rem; max-width: 42rem; text-align: center; line-height: 1.5; }
+    .wrap { width: 100%; max-width: 960px; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 48px rgba(0,0,0,.45); }
+    .back { margin-top: 1.25rem; font-size: 0.85rem; }
+    .back a { color: #58a6ff; text-decoration: none; }
+    .back a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>smartvideo — sample (staged master)</h1>
+  <p class="sub">Plyr player. If this page is opened from the repo, the video loads from the same branch on raw.githubusercontent.com.</p>
+  <div class="wrap">
+    <video id="player" playsinline controls
+      poster="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427_poster.jpg"
+      data-poster="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427_poster.jpg">
+      <source src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" type="video/mp4" />
+    </video>
+  </div>
+  <p class="back"><a href="https://github.com/t0moon/smartvideo#demo">← Back to README</a></p>
+  <script src="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.polyfilled.min.js"></script>
+  <script>
+    new Plyr('#player', { keyboard: { global: true } });
+  </script>
+</body>
+</html>

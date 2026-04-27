@@ -4,11 +4,27 @@
 
 ## 示例成片
 
-本示例对应本机一次运行中 **staged 成片**（`final.staged.mp4`，路径：`outputs/20260427_195844/final.staged.mp4`），已复制到仓库 `docs/assets/` 供浏览与下载。
+本示例对应本机 **staged 成片**（`final.staged.mp4`），本机路径：`outputs/20260427_195844/final.staged.mp4`；已放入仓库 `docs/assets/` 供演示。
 
-<video src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" controls width="100%"></video>
+**说明：** GitHub 的 **README 里不能运行带脚本的「网页播放器」**（安全策略），所以下方只能用浏览器自带的 **HTML5 `<video>` 控件** 做内联播放。若要 **Plyr 增强播放器**（更好 UI、快捷键、倍速等），请**在新标签页**打开 [docs/demo-player.html](docs/demo-player.html)：
 
-[直接打开 / 下载 MP4](docs/assets/demo_final_staged_20260427.mp4)
+- [用 HTMLPreview 打开 Plyr 页面](https://htmlpreview.github.io/?https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/demo-player.html)（无需开启 GitHub Pages）
+- 若已在仓库 **Settings → Pages** 中开启 `docs` 部署：访问 `https://t0moon.github.io/smartvideo/demo-player.html`
+
+**内联预览**（系统原生播放控件 + 封面图）：
+
+<video
+  controls
+  playsinline
+  preload="metadata"
+  poster="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427_poster.jpg"
+  style="max-width:100%;border-radius:8px;background:#0d1117;"
+  width="100%">
+  <source src="https://raw.githubusercontent.com/t0moon/smartvideo/main/docs/assets/demo_final_staged_20260427.mp4" type="video/mp4" />
+  <p>当前环境不支持内嵌视频，请<a href="docs/assets/demo_final_staged_20260427.mp4">下载 MP4</a>，或使用上方 Plyr 链接。</p>
+</video>
+
+[直接打开 / 下载 MP4](docs/assets/demo_final_staged_20260427.mp4) · [网页播放器源码](docs/demo-player.html)
 
 ## 项目概述
 
