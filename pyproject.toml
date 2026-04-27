@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[project]
+name = "smartvideo"
+version = "0.1.0"
+description = "Brand ad storyboard agent (LangGraph) with external SKILL.md prompts"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=0.2.0",
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.2.0",
+  "pydantic>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "httpx>=0.27.0",
+  "beautifulsoup4>=4.12.0",
+  "ddgs>=9.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
+
+[project.scripts]
+smartvideo = "app.run:main"
+smartvideo-remake = "app.remake_clips:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,2 @@
+[console_scripts]
+smartvideo = app.run:main

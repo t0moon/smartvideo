@@ -1,0 +1,1 @@
+"""Smartvideo application package."""
