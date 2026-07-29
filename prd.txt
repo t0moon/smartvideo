@@ -1,0 +1,632 @@
+﻿一、项目背景
+随着大模型、多模态模型及视频生成模型的发展，AI 已具备生成高质量视频内容的能力。然而，目前市面上的 AI 视频产品仍存在以下问题：
+• 以 Prompt 为中心，缺少完整的视频生产流程；
+• 缺少 Human in the Loop，无法满足企业审核需求；
+• 无法管理长期项目，修改成本高；
+• 缺少资产沉淀，每次生成均需重新构建内容；
+• 无法与企业 IM（飞书、企业微信等）结合。
+因此，本项目设计并实现一个面向企业的视频生产平台，通过 Workflow、Agent、Human in the Loop 和 Asset Library，实现完整的视频生产闭环。
+￼
+二、产品定位
+定位：
+企业级 AI 视频生产平台（AI Video Production Platform）
+产品目标：
+利用 AI Agent 自动完成视频创作，并通过人工审核保证内容质量，实现视频生产自动化，同时沉淀企业创意资产。
+￼
+三、目标用户
+主要用户：
+• 企业市场部门
+• 品牌运营人员
+• 新媒体运营
+• 内容创作者
+• AI 视频运营团队
+典型场景：
+• 产品宣传视频
+• TikTok 短视频
+• 小红书内容
+• 数字人口播
+• 品牌宣传视频
+￼
+四、产品目标
+支持用户通过自然语言快速生成视频。
+实现：
+• Requirement Understanding
+• Storyboard Generation
+• Asset Preparation
+• Scene Generation
+• Video Production
+• Human Review
+• Publish
+• Asset Accumulation
+形成完整生产闭环。
+￼
+五、产品架构
+复制
+Project
+    │
+Workflow
+    │
+Requirement
+    │
+Storyboard
+    │
+Assets
+    │
+Scene
+    │
+Video
+    │
+Review
+    │
+Publish
+    │
+Asset Library
+￼
+六、核心功能
+6.1 项目管理（Project）
+功能：
+创建视频项目。
+每个项目拥有：
+• Project ID
+• 当前阶段
+• Workspace
+• Review History
+• Asset Reference
+支持：
+• 创建
+• 删除
+• 恢复
+• 查询
+• 历史版本
+￼
+6.2 Requirement Understanding
+用户通过 IM 或 Web 输入自然语言：
+例如：
+帮我制作一个30秒 Apple 产品广告。
+AI 自动解析：
+输出：
+• 视频长度
+• 风格
+• 品牌
+• 平台
+• 人物类型
+• 数字人
+• 配音
+• 字幕
+生成：
+Video Specification。
+用户确认后进入下一阶段。
+￼
+6.3 Storyboard Generation
+根据 Requirement 自动生成 Storyboard。
+包含：
+• Scene
+• Shot
+• Duration
+• Camera
+• Prompt
+支持：
+• AI 自动生成
+• 用户修改
+• 用户评论
+• 局部重新生成
+￼
+6.4 Asset Preparation
+根据 Storyboard 自动准备：
+• Character
+• Voice
+• First Frame
+• Last Frame
+• Brand Style
+• Prompt
+• Reference Image
+生成资产后：
+暂停 Workflow。
+等待：
+用户确认。
+￼
+6.5 Scene Generation
+根据 Storyboard：
+生成：
+Scene Prompt。
+调用：
+Video Model。
+生成：
+每一个 Clip。
+支持：
+并行生成。
+￼
+6.6 Video Production
+自动完成：
+• Clip Merge
+• Voice
+• Subtitle
+• Transition
+• Background Music
+• Render
+输出：
+Draft Video。
+￼
+6.7 Human Review
+支持：
+Human in the Loop。
+Review 类型：
+• Approve
+• Reject
+• Comment
+• Partial Revision
+Workflow：
+暂停。
+等待：
+用户审批。
+支持：
+IM。
+Web。
+￼
+6.8 Publish
+支持：
+导出：
+MP4。
+支持：
+发布：
+• TikTok
+• YouTube
+• 小红书
+支持：
+下载。
+￼
+6.9 Asset Library
+项目结束以后：
+自动沉淀：
+资产。
+包括：
+品牌资产：
+• Logo
+• Tone
+• Prompt
+人物资产：
+• Character
+• Voice
+创意资产：
+• Storyboard
+• Prompt
+• Camera Style
+媒体资产：
+• Image
+• Video
+• Subtitle
+以后：
+直接：
+复用。
+￼
+七、完整用户旅程
+复制
+Create Project
+        │
+        ▼
+Requirement Understanding
+        │
+──────── Human Confirm ────────
+        │
+        ▼
+Storyboard Generation
+        │
+──────── Human Review ─────────
+        │
+        ▼
+Asset Preparation
+        │
+──────── Human Confirm ────────
+        │
+        ▼
+Scene Generation
+        │
+        ▼
+Video Production
+        │
+──────── Human Review ─────────
+        │
+        ▼
+Publish
+        │
+        ▼
+Asset Accumulation
+￼
+八、Human in the Loop
+系统设置三个关键审批节点：
+第一阶段：
+Requirement。
+确认：
+Video Spec。
+第二阶段：
+Storyboard。
+确认：
+Story。
+第三阶段：
+Assets。
+确认：
+数字人。
+声音。
+首尾帧。
+最后：
+Video Review。
+决定：
+是否发布。
+所有审批：
+均支持：
+IM。
+Web。
+￼
+九、资产沉淀
+每个项目结束以后：
+自动沉淀：
+Workspace。
+资产。
+包括：
+复制
+Brand
+
+Character
+
+Prompt
+
+Storyboard
+
+Scene
+
+Voice
+
+Subtitle
+
+Video
+
+Review
+保存：
+Asset Library。
+用于：
+未来：
+项目复用。
+十、系统架构
+
+          HTTP / IM
+               │
+               ▼
+         API Gateway
+               │
+               ▼
+     ┌─────────────────┐
+     │  Workflow Config │ ← YAML 定义（描述各阶段 agent/skill/review 配置）
+     └────────┬────────┘
+              │
+              ▼
+        Workflow Runtime          ← engine/ + pipeline/ 合并为 runtime/
+       (runtime/executor + scheduler + state_machine)
+              │
+              ▼
+     ┌─────────────────┐
+     │  Middleware Chain │         ← base.py + registry.py，声明式注册
+     │  ┌─────────────┐  │         tracing / tool_guard / approval / audit / retry
+     │  │ Guardrails  │  │         ← content compliance（广告法、品牌禁忌）
+     │  └─────────────┘  │
+     └─────────────────┘
+              │
+              ▼
+       Context Builder
+        ▲           ▲
+        │           │
+  Workspace      Asset Center
+  (当前项目)     (长期资产库)
+              │
+              ▼
+       Lead Agent              ← 一个通用 agent，通过 skill 组合区分阶段
+        │                      （不再拆 7 个专用 agent）
+        ▼
+       Skill Chain
+  (requirement / storyboard / character / scene / video / subtitle / review / publish)
+        │
+        ▼
+     Subagents                  ← 并行场景生成
+        │
+        ▼
+    Model Router → Tools → Providers
+        │
+        ▼
+    Pipeline Hooks (after)
+        │
+        ├── Save Workspace (snapshot)
+        ├── Save Assets (asset library)
+        ├── Publish Event (event bus)
+        ├── Trace (Langfuse / LangSmith)
+        ├── Pause (Human Review)
+        └── Audit Log
+十一 代码目录
+
+backend/
+│
+├── app/                              # FastAPI 应用入口
+│   ├── main.py
+│   ├── lifespan.py
+│   ├── dependency.py
+│   ├── config.py
+│   ├── api/
+│   │   ├── project.py
+│   │   ├── workspace.py
+│   │   ├── review.py
+│   │   ├── asset.py
+│   │   └── webhook.py
+│   └── websocket/
+│
+├── workflows/                        # ⭐ Workflow 定义（YAML）
+│   ├── product_ad_v1.yaml            # 产品广告
+│   ├── douyin_short_v1.yaml          # 抖音短视频
+│   ├── digital_human_v1.yaml         # 数字人口播
+│   └── __init__.py
+│
+├── runtime/                          # ⭐ Workflow Runtime（engine + pipeline 合并）
+│   ├── executor.py                   # 节点执行器
+│   ├── scheduler.py                  # 调度器（同步/异步）
+│   ├── planner.py                    # 规划器（动态节点编排）
+│   ├── state_machine.py              # 状态机
+│   ├── checkpoint.py                 # 检查点（对接 deerflow.persistence）
+│   ├── workflow.py                   # 工作流解释引擎
+│   └── hooks/                        # 原 pipeline/
+│       ├── base.py                   # Hook 抽象基类
+│       ├── validator.py              # 节点输出校验
+│       ├── persister.py              # 持久化钩子
+│       ├── publisher.py              # 发布钩子
+│       └── registry.py               # Hook 注册
+│
+├── middleware/                       # ⭐ 中间件链（声明式注册）
+│   ├── base.py                       # AgentMiddleware 抽象基类
+│   ├── registry.py                   # 链装配（@Next/@Prev 定位）
+│   ├── tracing.py                    # 链路追踪（复用 deerflow.tracing）
+│   ├── tool_guard.py                 # 工具调用安全守卫
+│   ├── approval.py                   # Human in the Loop 审批
+│   ├── audit.py                      # 操作审计
+│   ├── retry.py                      # 自动重试（复用 deerflow.agents.middlewares）
+│   ├── cache.py                      # 结果缓存
+│   └── model_router.py               # 模型路由选择
+│
+├── agents/                           # Agent（一个通用 Lead Agent + skill 组合）
+│   ├── lead_agent.py                 # 通用决策循环（复用 deerflow.agents.factory）
+│   ├── factory.py                    # 按阶段装配不同的 skill 组合
+│   └── prompts/                      # 各阶段 system prompt
+│       ├── requirement.txt
+│       ├── storyboard.txt
+│       ├── asset.txt
+│       ├── scene.txt
+│       ├── video.txt
+│       ├── review.txt
+│       └── publish.txt
+│
+├── skills/                           # ⭐ 可复用业务能力（复用 deerflow.skills 框架）
+│   ├── requirement/
+│   ├── storyboard/
+│   ├── character/
+│   ├── scene/
+│   ├── video/
+│   ├── subtitle/
+│   ├── review/
+│   └── publish/
+│
+├── guardrails/                       # ⭐ 合规检查（新增）
+│   ├── base.py                       # Guardrail 抽象基类
+│   ├── provider.py                   # 合规检查提供者
+│   ├── ad_law.py                     # 广告法合规（禁用词、绝对化用语）
+│   ├── brand_taboo.py                # 品牌禁忌检查
+│   ├── content_safety.py             # 内容安全（暴力/色情/政治敏感）
+│   └── registry.py                   # 合规规则注册
+│
+├── context/                          # ⭐ Context Center
+│   ├── manager.py
+│   ├── builder.py
+│   ├── selector.py
+│   ├── serializer.py
+│   └── providers/
+│       ├── workspace.py
+│       ├── asset.py
+│       ├── review.py
+│       └── project.py
+│
+├── workspace/                        # ⭐ 当前项目工作区
+│   ├── manager.py
+│   ├── repository.py
+│   ├── snapshot.py
+│   ├── serializer.py
+│   ├── artifacts.py
+│   └── models.py
+│
+├── assets/                           # ⭐ 长期资产中心
+│   ├── service.py
+│   ├── repository.py
+│   ├── retriever.py
+│   ├── indexer.py
+│   ├── brand/
+│   ├── character/
+│   ├── prompt/
+│   ├── template/
+│   ├── media/
+│   ├── subtitle/
+│   └── voice/
+│
+├── review/                           # Human in the Loop
+│   ├── service.py
+│   ├── queue.py
+│   ├── comment.py
+│   ├── history.py
+│   └── approval.py
+│
+├── project/                          # Project 生命周期
+│   ├── service.py
+│   ├── repository.py
+│   ├── models.py
+│   └── stages.py
+│
+├── subagents/                        # ⭐ 子代理系统（新增，复用 deerflow.subagents）
+│   ├── executor.py                   # 并行执行引擎
+│   ├── registry.py                   # 子代理注册
+│   └── scene_worker.py               # 场景并行生成 worker
+│
+├── channels/                         # IM渠道适配（复用 deerflow.channels）
+│   ├── feishu/
+│   ├── wecom/
+│   ├── slack/
+│   └── webhook/
+│
+├── models/                           # LLM统一管理（复用 deerflow.models）
+│   ├── registry.py
+│   ├── factory.py
+│   ├── router.py
+│   ├── structured.py
+│   └── prompt.py
+│
+├── tools/                            # Tool抽象（领域特有工具）
+│   ├── video/                        # 视频生成工具
+│   ├── tts/                          # 语音合成工具
+│   ├── subtitle/                     # 字幕生成工具
+│   ├── ffmpeg/                       # 视频编辑工具
+│   ├── publish/                      # 发布工具（TikTok/YouTube/小红书）
+│   └── storage/                      # 存储工具
+│   │                                # 搜索/浏览器等通用工具复用 deerflow.community
+├── providers/                        # 第三方SDK
+│   ├── llm/
+│   ├── image/
+│   ├── video/
+│   ├── tts/
+│   ├── storage/
+│   └── notify/
+│
+├── events/                           # Event Bus
+│   ├── bus.py
+│   ├── publisher.py
+│   ├── subscriber.py
+│   └── events.py
+│
+├── observability/                    # 可观测性（复用 deerflow.tracing）
+│   ├── tracing/
+│   ├── metrics/
+│   ├── logging/
+│   └── exporter/
+│
+├── storage/                          # 数据存储
+│   ├── mysql/
+│   ├── redis/
+│   ├── oss/
+│   └── vector/
+│
+├── shared/
+│   ├── enums.py
+│   ├── schemas.py
+│   ├── constants.py
+│   ├── exceptions.py
+│   └── utils/
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+│
+└── Makefile
+
+这套架构的数据流
+
+我建议整个系统的数据流固定为：
+
+          HTTP / IM
+               │
+               ▼
+         API Gateway
+               │
+               ▼
+         Workflow Config           ← 读取 workflows/*.yaml 决定执行路径
+               │
+               ▼
+        Workflow Runtime
+               │
+               ▼
+      ┌─────────────────────┐
+      │  Middleware Chain    │  ← registry 按序执行 tracing / guardrails / approval / retry
+      │  (before each step)  │
+      └──────────┬──────────┘
+                 │
+                 ▼
+            Context Builder
+             ▲           ▲
+             │           │
+        Workspace     Asset Center
+                 │
+                 ▼
+            Lead Agent           ← 装载当前阶段的 skill + tools
+                 │
+                 ▼
+       ┌─────────────────┐
+       │  Guardrails      │  ← 合规检查（广告法 / 品牌禁忌 / 内容安全）
+       │  (step output)   │
+       └─────────────────┘
+                 │
+                 ▼
+       ┌─────────────────┐
+       │  Subagents       │  ← 并行场景生成（复用 deerflow.subagents.executor）
+       │  (parallel)      │
+       └─────────────────┘
+                 │
+                 ▼
+       Model Router → Tools → Providers
+                 │
+                 ▼
+      ┌─────────────────────┐
+      │  Middleware Chain    │  ← pipeline hooks: save workspace / save assets /
+      │  (after each step)  │     publish event / trace / pause for review / audit
+      └─────────────────────┘
+                 │
+                 ▼
+         ┌───────┴───────┐
+         │               │
+    Continue Step    Pause for
+    (next step)     Human Review
+                     (feishu/wecom/slack)
+十二、非功能需求
+可扩展性
+支持新增：
+• Agent
+• Skill
+• Tool
+• Provider
+无需修改 Workflow。
+￼
+可观测性
+采用：
+LangSmith。
+或：
+Langfuse。
+记录：
+• Workflow Trace
+• Agent Trace
+• Tool Trace
+• LLM 调用
+• Token
+• Cost
+• Latency
+• Human Approval
+支持：
+链路追踪。
+问题定位。
+￼
+可靠性
+支持：
+Checkpoint。
+Workflow：
+Pause。
+Resume。
+Retry。
+支持：
+失败恢复。
+￼
+安全性
+权限：
+Project。
+Workspace。
+Asset。
+Review。
+支持：
+RBAC。

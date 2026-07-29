@@ -1,0 +1,310 @@
+ ## 依赖关系图
+
+  先梳理模块之间的依赖，才能确定顺序：
+
+  Level 1:  数据模型 / Schema / Config / Storage
+                 │
+  Level 2:  Provider 抽象层 (LLM / Video / TTS / Image)
+            Workspace 管理 + 文件系统
+                 │
+  Level 3:  Agent / Skill 系统 ← 复用现有项目的 skills/
+            视频生产管线 (Scene → Video → Audio → Stitch)
+                 │
+  Level 4:  Project 管理 + 项目生命周期
+            Review / Approval 系统
+            Workflow Runtime (状态机 + pause/resume)
+                 │
+  Level 5:  Web API (FastAPI) + WebSocket + Frontend
+                 │
+  Level 6:  Asset Library (资产沉淀/检索/复用)
+            IM 渠道 (飞书/企微/Slack)
+            Middleware Chain + Guardrails
+            Event Bus + Observability
+                 │
+  Level 7:  多平台发布 (TikTok/YouTube/小红书)
+            RBAC + 权限系统
+            E2E 测试 + 部署
+
+  ———
+
+  ## 推荐的 6 个阶段
+
+  ### Phase 1 — Core Engine（MVP，2-3 周）
+
+  目标：在新架构下跑通从 brief 到成片的闭环
+
+  做的事情：
+
+  1. 按 PRD 的 backend/ 目录结构搭 scaffold
+  2. 定义核心数据模型：Project、Workspace、Scene、AgentState
+  3. 实现配置系统（复用现有 app/config.py 的模式）
+  4. 迁移 Provider 层：providers/video/（复用 http_video.py、openai_videos.py、factory.py）、providers/llm/
+  5. 实现 Workspace：文件系统级的工作区管理，产出按 run_id 存储
+  6. 迁移媒体处理：tools/ffmpeg/、tools/tts/、tools/subtitle/
+  7. 实现 Agent/Skill 系统：Lead Agent 加载 prompt + tools，调用 provider
+  8. 实现视频生产管线：Requirement → Storyboard → Scene → Video → Audio → Stitch
+  9. CLI 入口：smartvideo run "brief" 能跑通
+
+  可交付物：CLI 可运行，从 brief 到 MP4 成片，和现有项目等价但架构对齐 PRD
+
+  ———
+
+  ### Phase 2 — Web Platform + Project 管理（2-3 周）
+
+  目标：用户可以通过浏览器使用平台
+
+  做的事情：
+
+  1. Project 生命周期管理（create/delete/list/restore） + Stage 管理
+  2. 数据存储层：SQLite → 可切换 MySQL，Redis（可选）
+  3. FastAPI 应用入口：main.py、lifespan.py、dependency.py
+  4. API 端点：project.py、workspace.py、review.py、webhook.py
+  5. WebSocket：实时推送项目状态变更
+  6. 基础 Frontend（React/Vue）：项目列表页 → 项目详情页 → 结果查看页
+  7. 后台 Worker：将耗时的视频生成任务异步化
+
+  可交付物：用户可以通过 Web 创建项目、填写 brief、查看进度、下载成片
+
+  ———
+
+  ### Phase 3 — Human in the Loop（2 周）
+
+  目标：关键的审批节点可以在 Web 上运作
+
+  做的事情：
+
+  1. Review Service：审批队列 + comment + 历史记录
+  2. Approval 节点：Requirement 确认、Storyboard 确认、Asset 确认、Video 审核
+  3. Workflow Pause/Resume：在审批节点自动暂停，审批通过后恢复
+  4. Web 审批界面：查看待审批内容、approve/reject/comment
+  5. 审批通知（Web 端，IM 待 Phase 4）
+
+  可交付物：视频生产流程中遇到审批节点会暂停并通知用户，在 Web 上完成审批后流程继续
+
+  ———
+
+  ### Phase 4 — Asset Library + Workflow Engine 升级（2-3 周）
+
+  目标：项目间资产可复用，workflow 可配置
+
+  做的事情：
+
+  1. Asset Center：品牌资产（logo/tone/prompt）、人物资产（character/voice）、媒体资产（image/video/subtitle）
+  2. Asset Indexing + Retrieval：嵌入向量化 + 语义检索
+  3. Yaml Workflow Definition：workflows/product_ad_v1.yaml 等
+  4. Workflow Runtime 重构：YAML 解释引擎 → 状态机 → executor → scheduler
+  5. Checkpoint 系统：workflow 可暂停/恢复
+  6. Pipeline Hooks：workspace 保存、asset 沉淀、event 发布
+
+  可交付物：项目结束后资产自动沉淀到资产库，新项目可以直接引用；workflow 可通过 YAML 配置而非硬编码
+
+  ———
+
+  ### Phase 5 — IM 集成 + Enterprise Features（2-3 周）
+
+  目标：飞书/企微内可审批，平台安全合规
+
+  做的事情：
+
+  1. Channel 抽象：Feishu adapter → 消息推送 + 审批交互
+  2. WeCom / Slack adapter（可选）
+  3. Guardrails 系统：广告法合规（禁用词检查）、品牌禁忌、内容安全
+  4. Middleware Chain：tracing → tool_guard → approval → audit → retry → cache
+  5. Event Bus：事件发布/订阅解耦模块通信
+  6. Observability：Langfuse/LangSmith 集成 + 自定义 metrics/logging
+  7. RBAC：Project / Workspace / Asset / Review 权限模型
+
+  可交付物：用户可以在飞书/企微内创建项目、审批视频；平台具备合规检查、审计日志、链路追踪能力
+
+  ———
+
+  ### Phase 6 — 发布 + 收尾（1-2 周）
+
+  目标：成片可直接发布到平台
+
+  做的事情：
+
+  1. Publish Service：TikTok API、YouTube API、小红书 API 对接
+  2. 子代理系统：并行场景生成（subagents/scene_worker.py）
+  3. 模型路由：按场景类型自动选择最优 provider/model
+  4. 完整 Frontend：所有功能的 UI 覆盖
+  5. E2E 测试
+  6. 部署文档 + Docker 化
+
+  可交付物：产品功能完整，可部署上线
+
+  ———
+
+  ## 关键决策点
+
+   阶段       决策                      选项
+  ━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Phase 1    是否依赖 deerflow 框架    建议先独立实现核心引擎，降低初期依赖风险
+  ─────────  ────────────────────────  ──────────────────────────────────────────
+   Phase 2    前端框架选型              React（生态更成熟）vs Vue（上手更快）
+  ─────────  ────────────────────────  ──────────────────────────────────────────
+   Phase 4    YAML schema 设计          参考 Temporal / Airflow 的 DAG 定义方式
+  ─────────  ────────────────────────  ──────────────────────────────────────────
+   Phase 5    IM 优先渠道               建议先做飞书（国内企业主流），再做企微
+
+  ———
+
+  总结：先跑通核心管线 → 再上 Web → 再加审批 → 再沉淀资产 → 再 IM/合规 → 最后发布。每个阶段都有可交付物，不需要全部做完
+  就能用。
+
+
+› 如果想要并行开发，判断是否可行
+
+
+• 可以并行，但约束很明确——Phase 1 是硬依赖瓶颈，之后可以大幅展开。
+
+  让我按模块间的实际耦合度来分析。
+
+  ———
+
+  ## 依赖矩阵
+
+   模块                  前置依赖                          独立程度
+  ━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   数据模型 / Schema     无                                ⭐ 完全独立
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   视频 Provider         数据模型（ProviderConfig）        ⭐ 几乎独立
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   FFmpeg / 音频工具     无                                ⭐ 完全独立，纯工具代码
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Workspace 文件管理    数据模型                          ⭐ 几乎独立
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Agent / Skill 系统    Provider + 数据模型               ⭐ 中等，接口定义后即可并行
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Project API           数据模型 + Storage                ⭐ 中等
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Frontend              数据模型 + API 接口契约           ⭐ 接口定义后即可 Mock 先行
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Asset Library         数据模型 + Workspace + Storage    ⭐ 接口定义后即可并行
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Review / Approval     Project + Workspace + Agent       🔴 依赖较多
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Workflow Runtime      Agent + Skill + 数据模型          🔴 依赖较多
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   IM 渠道               Review + API                      🔴 依赖较多
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Guardrails            Agent 输出模型 Schema             🔴 但 schema 定义后即可并行
+  ────────────────────  ────────────────────────────────  ─────────────────────────────
+   Publish               Asset + Video 输出格式            🔴 依赖较多
+
+  ———
+
+  ## 可行的并行方案
+
+  ### 场景 A：3 人团队（推荐，效率最高）
+
+  优势是可以精确拆到模块无争抢：
+
+  开发者 1:           开发者 2:           开发者 3:
+  ────────────        ────────────        ────────────
+  Phase 1A:           Phase 1B:           Phase 1C:
+  · 数据模型/Schema   · Provider 迁移      · FFmpeg/音频迁移
+  · 配置系统          · 视频 Provider      · 字幕工具
+  · Project/Workspace  · LLM Provider    · Skill 系统 prompt
+   存储层              · TTS Provider      迁移
+  · Storage 抽象
+                      Phase 2A:           Phase 2B:
+                      · Agent 集成         · FastAPI scaffold
+                      · 视频生产管线        · WebSocket
+                      · CLI 入口           · Frontend 路由骨架
+
+                      Phase 3:            Phase 3:
+                      · Review Service    · 审批 UI
+                      · Asset Library     · 项目详情页
+                      · IM 渠道准备        · 后端联调
+
+  瓶颈：Phase 1 至少需要 1-2 周串行才能让三个人都跑起来。之后基本不冲突。
+
+  ### 场景 B：5 人团队（需要接口契约先行）
+
+  Team A (2人):       Team B (1人):       Team C (1人):       Team D (1人):
+  核心引擎 + API      迁移 Provider        前端                资产 + 发布
+
+  先共同定义接口契约（1 周）：
+  ┌─────────────────────────────────────────────────────────────┐
+  │  接口契约定义: 数据模型/OpenAPI Schema/Provider 接口/skill 接口   │
+  │  (全团队参与, 1 周)                                             │
+  └─────────────────────────────────────────────────────────────┘
+
+  之后分头开发：
+
+  Team A-1:           Team B:              Team C:              Team D:
+  · 数据模型/存储      · video provider     · 项目列表页          · Asset 模型
+  · Workspace          · LLM provider       · 项目详情页          · Asset indexer
+  · Project API        · TTS provider       · 视频预览页          · Asset API
+  · Workflow Runtime   · Agent 集成         · 审批组件            · Publish service
+  · Event Bus          · 媒体工具            · 与 API Mock 联调    · 发布 API
+  · Observability
+
+  瓶颈：第 1 周需要全团队对齐接口契约，之后基本解耦。Team C 从头到尾可以用 Mock 开发，不需要等后端。
+
+  ### 场景 C：10+ 人团队（快速推进）
+
+  第 1 周：接口对齐 + Phase 1 核心
+
+  · 架构组 (2人): 数据模型/接口契约/架构决策
+  · 引擎组 (3人): Workspace/Project/Storage/CLI
+  · 媒体组 (2人): Provider迁移/FFmpeg/Agent集成
+  · 前端组 (2人): Mock开发所有页面
+  · 资产组 (1人): Asset 模型设计
+
+  第 2-3 周：并行展开
+
+  · 引擎组 → Workflow Runtime + Event Bus + Middleware
+  · 媒体组 → Guardrails + Subagent + 生产管线
+  · 前端组 → 所有页面，对接真实 API
+  · 资产组 → Asset 实现 + 索引 + 检索
+  · 新增两路：IM 渠道组 (2人) + 发布组 (1人)
+
+  第 4-5 周：集成 + 打磨
+
+  · 各组集成联调
+  · E2E 测试
+  · 部署
+
+  ———
+
+  ## 不能并行硬上的一些限制
+
+  1. Provider 接口不能频繁改
+  Agent 系统写死在调用 provider.generate_video(context)。如果 provider 接口改了，agent 和所有测试都要改。Phase 1 开跑
+  前，Provider 抽象层必须冻结。
+
+  2. Workflow Runtime 和 Agent 是共生关系
+  Runtime 决定什么时候调用 agent、传什么 context、怎么处理返回。Agent 决定 runtime 需要做什么。这两块最好由同一个人或同
+  一对搭档完成。
+
+  3. Frontend 不能无限独立
+  审批流程、Workflow 状态机、Project 生命周期变更的交互逻辑很复杂，如果前端完全独立开发，后期对接时会出现"这个状态到底谁
+  驱的"问题。建议 前端在 Phase 2 跟 API 一起做，不要提前 2 周以上。
+
+  4. IM 渠道必须等 Review 接口稳定
+  IM 审批的核心是 review_service.submit_decision(project_id, review_id, action, comment) 这个接口。接口稳定前 IM 渠道能
+  做的只是注册 webhook 和消息收发。
+
+  ———
+
+  ## 总结
+
+   团队规模    并行度              建议
+  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   2-3 人      中等                Phase 1 串行 1-2 周，之后 3 路展开。最实际
+  ──────────  ──────────────────  ────────────────────────────────────────────
+   4-6 人      高                  第 1 周接口契约对齐，之后分 4 路。效率最高
+  ──────────  ──────────────────  ────────────────────────────────────────────
+   10+ 人      极高但管理成本高    需要架构组控接口 + 每周同步，否则碎片化
+
+  核心判断：接口契约先行的前提下，并行开发完全可行。但 Phase 1 最少需要 1 周串行才能让所有人都跑起来——这个压缩不了。
+
+
+
+
+
+
+
+

@@ -1,0 +1,11 @@
+﻿__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.venv
+.git
+.gitignore
+.env
+data/projects/*
+!data/projects/.gitkeep
+*.md

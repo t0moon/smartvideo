@@ -1,0 +1,83 @@
+﻿# Digital Human Presenter Video Workflow v1
+# Workflow for creating digital human presenter/口播 videos
+
+name: digital_human_v1
+description: Digital human presenter video production
+version: 1.0.0
+
+stages:
+  - id: requirement
+    name: Script Requirement
+    agent: lead
+    skill: requirement
+    next: script_gen
+    pause_for_review: true
+    inputs:
+      brief: '{{project.brief}}'
+    outputs:
+      video_spec: 'workflow_state.video_spec'
+
+  - id: script_gen
+    name: Script & Storyboard Generation
+    agent: lead
+    skill: storyboard
+    next: presenter_setup
+    pause_for_review: true
+    inputs:
+      spec: 'workflow_state.video_spec'
+    outputs:
+      script: 'workflow_state.script'
+
+  - id: presenter_setup
+    name: Digital Presenter Selection
+    agent: lead
+    skill: character
+    next: scene_gen
+    pause_for_review: true
+    inputs:
+      script: 'workflow_state.script'
+    outputs:
+      character: 'workflow_state.character'
+
+  - id: scene_gen
+    name: Scene & Voice Generation
+    agent: lead
+    skill: scene
+    next: merge
+    pause_for_review: false
+    inputs:
+      script: 'workflow_state.script'
+      character: 'workflow_state.character'
+    outputs:
+      voiceover: 'workflow_state.voiceover'
+      scenes: 'workflow_state.scenes'
+
+  - id: merge
+    name: Lip-sync & Scene Merge
+    agent: video_provider
+    next: stitch
+    pause_for_review: false
+    inputs:
+      voiceover: 'workflow_state.voiceover'
+      scenes: 'workflow_state.scenes'
+    outputs:
+      clips: 'workflow_state.clips'
+
+  - id: stitch
+    name: Final Rendering
+    agent: ffmpeg
+    next: null
+    pause_for_review: true
+    inputs:
+      clips: 'workflow_state.clips'
+      subtitles: true
+    outputs:
+      final_video: 'workflow_state.final_video_path'
+
+hooks:
+  after_stage:
+    - save_workspace
+    - audit_log
+  after_pipeline:
+    - collect_assets
+    - publish_event

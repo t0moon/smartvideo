@@ -1,0 +1,56 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# ============ Node ============
+node_modules/
+dist/
+build/
+*.local
+
+# ============ Secrets / Env (NEVER commit real .env) ============
+.env
+.env.*
+!.env.example
+backend/.env
+**/.env
+
+# ============ Runtime data & generated outputs ============
+data/
+backend/data/
+backend/outputs/
+outputs/
+
+# ============ Logs ============
+*.log
+backend/*.log
+frontend/*.log
+
+# ============ ngrok binary & temp ============
+ngrok-v3-stable-windows-amd64/
+ngrok-v3-stable-windows-amd64.zip
+ngrok.yml
+ngrok_*.log
+
+# ============ IDE / OS ============
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ============ WorkBuddy / agent internal data ============
+.workbuddy/
+.agents/
+
+# ============ Misc junk ============
+新建文本文档.txt
+
+# ============ Local debug/test scripts (may contain hardcoded credentials) ============
+backend/find_open_id.py
+backend/test_*.py

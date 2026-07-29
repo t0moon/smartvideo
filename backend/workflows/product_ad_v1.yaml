@@ -1,0 +1,68 @@
+# Product Ad Workflow v1
+# Workflow for creating brand product advertisement videos
+
+name: product_ad_v1
+description: Brand product advertisement video production
+version: 1.0.0
+
+stages:
+  - id: requirement
+    name: Requirement Understanding
+    agent: lead
+    skill: requirement
+    next: storyboard
+    pause_for_review: true
+    inputs:
+      brief: '{{project.brief}}'
+    outputs:
+      video_spec: 'workflow_state.video_spec'
+
+  - id: storyboard
+    name: Storyboard Generation
+    agent: lead
+    skill: storyboard
+    next: scene_gen
+    pause_for_review: true
+    inputs:
+      spec: 'workflow_state.video_spec'
+    outputs:
+      storyboard: 'workflow_state.storyboard'
+
+  - id: scene_gen
+    name: Scene Generation
+    agent: lead
+    skill: scene
+    next: video_gen
+    pause_for_review: false
+    inputs:
+      storyboard: 'workflow_state.storyboard'
+    outputs:
+      scenes: 'workflow_state.scenes'
+
+  - id: video_gen
+    name: Video Clip Generation
+    agent: video_provider
+    next: stitch
+    pause_for_review: true
+    inputs:
+      scenes: 'workflow_state.scenes'
+    outputs:
+      clips: 'workflow_state.clips'
+
+  - id: stitch
+    name: Video Stitching
+    agent: ffmpeg
+    next: null
+    pause_for_review: false
+    inputs:
+      clips: 'workflow_state.clips'
+    outputs:
+      final_video: 'workflow_state.final_video_path'
+
+hooks:
+  after_stage:
+    - save_workspace
+    - audit_log
+  after_pipeline:
+    - collect_assets
+    - publish_event
