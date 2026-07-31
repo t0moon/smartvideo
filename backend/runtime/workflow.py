@@ -167,6 +167,10 @@ class WorkflowRuntime:
             # Continue to storyboard
             self._continue_storyboard(project_id, state, spec)
         elif pause_stage == 'storyboard':
+            # Storyboard approved → asset preparation (4th HITL)
+            self._continue_asset_prep(project_id, state)
+        elif pause_stage == 'asset_prep':
+            # Asset prep approved → scene generation + video production
             self._continue_scenes(project_id, state)
         elif pause_stage == 'video_review':
             self._continue_stitch(project_id, state)
@@ -265,6 +269,56 @@ class WorkflowRuntime:
         get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
             'project_id': project_id, 'review_id': r2.review_id, 'stage': 'storyboard'}))
         state.final_video_path = self._wait_for_approval(project_id, state, r2.review_id)
+
+    def _continue_asset_prep(self, project_id: str, state: WorkflowState) -> None:
+        """Continue from storyboard approval: prepare assets and pause for 4th HITL."""
+        sb_data = self.workspace.read_artifact(project_id, 'default', 'storyboard.json')
+        if not sb_data:
+            print('  [Resume] No storyboard found for asset prep')
+            # Fallback: skip to scenes
+            self._continue_scenes(project_id, state)
+            return
+
+        self.projects.advance_stage(project_id, ProjectStage.ASSET_PREP)
+
+        spec_data = self.workspace.read_artifact(project_id, 'default', 'video_spec.json')
+        spec = VideoSpec.model_validate(spec_data) if spec_data else VideoSpec()
+        storyboard = Storyboard.model_validate(sb_data)
+
+        # Build asset suggestions from storyboard + spec for human confirmation
+        asset_payload = {
+            'type': 'asset_prep',
+            'suggested_characters': [
+                {
+                    'role': s.title or f'Scene {i+1}',
+                    'description': s.description,
+                    'use_digital_human': getattr(spec, 'use_digital_human', False),
+                }
+                for i, s in enumerate(storyboard.scenes or [])
+            ],
+            'suggested_voice': getattr(spec, 'voice_over', '') or 'TBD',
+            'suggested_brand': getattr(spec, 'brand', '') or 'TBD',
+            'platform': getattr(spec, 'platform', '') or 'TBD',
+            'style_notes': getattr(storyboard, 'style_notes', ''),
+        }
+
+        # Inject world_constraints skill into asset context for LLM-assisted suggestions
+        from skills.loader import get_skill_prompt as _gsp
+        skill_text = _gsp('asset_prep')
+        if skill_text:
+            asset_payload['skill_guidance'] = skill_text[:500]  # Truncate for review display
+
+        r_asset = self.reviews.create_asset_review(project_id, asset_payload)
+        state.paused = True
+        state.meta['pause_review_id'] = r_asset.review_id
+        state.meta['pause_stage'] = 'asset_prep'
+        self._save_state(project_id, state)
+        print(f'  [Pause] Asset preparation review: {r_asset.review_id}')
+        get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
+            'project_id': project_id,
+            'review_id': r_asset.review_id,
+            'stage': 'asset_prep'}))
+        state.final_video_path = self._wait_for_approval(project_id, state, r_asset.review_id)
 
     def _continue_scenes(self, project_id: str, state: WorkflowState) -> None:
         """Continue from storyboard approval: scene_gen -> video_gen -> pause for video review."""
@@ -439,6 +493,19 @@ class WorkflowRuntime:
                 print(f'  [Assets] Collected {len(created)} assets for project {project_id}')
         except Exception as exc:
             print(f'  [Assets] Collection failed (non-fatal): {exc}')
+
+        # Publish: export final video to publish output directory
+        self.projects.advance_stage(project_id, ProjectStage.PUBLISH)
+        try:
+            from tools.publish import publish_local
+            spec = state.video_spec
+            title = f"{getattr(spec, 'brand', 'smartvideo')}_{project_id[:8]}"
+            pub_result = publish_local(state.final_video_path, title=title)
+            state.meta['publish_result'] = pub_result
+            print(f'  [Publish] {pub_result.get("status", "unknown")}: {pub_result.get("output_path", "")}')
+        except Exception as exc:
+            print(f'  [Publish] Export failed (non-fatal): {exc}')
+            state.meta['publish_result'] = {'status': 'error', 'message': str(exc)}
 
         self.projects.advance_stage(project_id, ProjectStage.DONE)
         self._save_state(project_id, state)

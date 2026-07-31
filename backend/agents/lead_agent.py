@@ -11,6 +11,15 @@ from observability.tracing import get_tracer
 from observability.metrics import get_metrics
 
 
+# Lazy import — skills/ is optional; if missing, injection is a no-op.
+def _get_skill_prompt(stage_name: str) -> str:
+    try:
+        from skills.loader import get_skill_prompt as _gsp
+        return _gsp(stage_name)
+    except Exception:
+        return ""
+
+
 class SceneList(BaseModel):
     scenes: list[Scene] = []
 
@@ -53,8 +62,16 @@ class LeadAgent:
             return path.read_text(encoding='utf-8')
         return ''
 
+    def _build_system(self, stage_name: str) -> str:
+        """Load base prompt + inject matching skill instructions."""
+        system = self._load_prompt(stage_name)
+        skill_text = _get_skill_prompt(stage_name)
+        if skill_text:
+            system = f"{system}\n\n## Domain Skill Instructions\n\n{skill_text}"
+        return system
+
     def understand_requirement(self, brief: str) -> VideoSpec:
-        system = self._load_prompt('requirement')
+        system = self._build_system('requirement')
         if not system:
             system = 'Extract video specification from the user brief. Return a JSON object.'
         messages = [
@@ -77,7 +94,7 @@ class LeadAgent:
             return VideoSpec(raw_brief=brief)
 
     def generate_storyboard(self, spec: VideoSpec, brand: BrandProfile | None = None) -> Storyboard:
-        system = self._load_prompt('storyboard')
+        system = self._build_system('storyboard')
         if not system:
             system = 'Generate a storyboard from the video specification.'
         context = f'Video Spec:\n{spec.model_dump_json(indent=2)}\n'
@@ -98,7 +115,7 @@ class LeadAgent:
             return Storyboard()
 
     def generate_scenes(self, storyboard: Storyboard, brand: BrandProfile | None = None) -> list[Scene]:
-        system = self._load_prompt('scene')
+        system = self._build_system('scene')
         if not system:
             system = 'Generate detailed scene descriptions from the storyboard.'
         context = f'Storyboard:\n{storyboard.model_dump_json(indent=2)}\n'
