@@ -105,6 +105,10 @@ def _handle_card_action(header: dict, action: dict) -> dict:
                 WorkflowRuntime().resume(pid, review_id)
             except Exception as exc:
                 print(f"  [Feishu-WS] Resume error for {pid}: {exc}")
+                try:
+                    WorkflowRuntime().record_resume_error(pid, exc)
+                except Exception:
+                    pass
 
         threading.Thread(target=_resume_bg, daemon=True).start()
         return {"status": "ok", "action": action_name, "project_id": pid}
@@ -171,6 +175,10 @@ def _handle_text_approval(sender: str, message_id: str, text: str, approve: bool
             WorkflowRuntime().resume(pid, review_id)
         except Exception as exc:
             print(f"  [Feishu-Chat] Resume error for {pid}: {exc}")
+            try:
+                WorkflowRuntime().record_resume_error(pid, exc)
+            except Exception:
+                pass
 
     threading.Thread(target=_resume_bg, daemon=True).start()
 

@@ -87,22 +87,33 @@ class WorkflowRuntime:
             self.projects.advance_stage(project_id, ProjectStage.VIDEO_PROD)
             with stage_span("video_prod", {"project_id": project_id, "scene_count": len(scenes)}):
                 clip_paths = {}
-                for i, scene in enumerate(scenes):
-                    with lf.start_as_current_observation(name=f"video.clip_{i+1}", trace_context=_tctx, as_type="tool", end_on_exit=True):
-                        prompt = scene.prompt or f'Scene {i+1}: {scene.description}'
+                clip_dir = self.workspace.artifacts_dir(project_id, run_id) / 'clips'
+                clip_dir.mkdir(exist_ok=True)
+                clip_idx = 0
+                for scene_i, scene in enumerate(scenes):
+                    shots = scene.shots or []
+                    if not shots:
+                        clip_idx += 1
+                        prompt = scene.prompt or f'Scene {scene_i + 1}: {scene.description}'
                         task_id = self.video_provider.generate_clip(prompt, duration_sec=scene.duration_sec)
-                        status = self.video_provider.poll_status(task_id)
-                if status == 'completed':
-                    clip_name = f'clip_{i+1:03d}.mp4'
-                    clip_dir = self.workspace.artifacts_dir(project_id, run_id) / 'clips'
-                    clip_dir.mkdir(exist_ok=True)
-                    clip_path = str(clip_dir / clip_name)
-                    self.video_provider.download_result(
-                        task_id, clip_path,
-                        duration_sec=scene.duration_sec,
-                    )
-                    clip_paths[scene.scene_id or f'scene_{i}'] = clip_path
-                    print(f'  [Video] Scene {i+1}: {clip_path}')
+                        clip_path = str(clip_dir / f'clip_{clip_idx:03d}.mp4')
+                        result_path = self.video_provider.download_result(
+                            task_id, clip_path, duration_sec=scene.duration_sec,
+                        )
+                        if result_path:
+                            clip_paths[scene.scene_id or f'scene_{scene_i}'] = result_path
+                        continue
+                    for shot in shots:
+                        clip_idx += 1
+                        duration = shot.duration_sec or 5
+                        prompt = shot.prompt or shot.description or f'Scene {scene_i + 1} shot'
+                        task_id = self.video_provider.generate_clip(prompt, duration_sec=duration)
+                        clip_path = str(clip_dir / f'clip_{clip_idx:03d}.mp4')
+                        result_path = self.video_provider.download_result(
+                            task_id, clip_path, duration_sec=duration,
+                        )
+                        if result_path:
+                            clip_paths[shot.shot_id or f'shot_{clip_idx}'] = result_path
             state.clips = clip_paths
 
             # Pause for video review
@@ -177,6 +188,52 @@ class WorkflowRuntime:
             return WorkflowState.model_validate(data)
         return WorkflowState(project_id=project_id)
 
+    def record_resume_error(self, project_id: str, error: str) -> None:
+        """Persist a resume failure to workflow_state so a silently swallowed
+        exception (e.g. in a background approval thread) becomes visible."""
+        try:
+            state = self._load_state(project_id)
+            state.errors.append({'step': 'resume', 'message': str(error)})
+            self._save_state(project_id, state)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Guardrail helpers (legal / brand / content-safety compliance)
+    # ------------------------------------------------------------------
+    def _gather_scene_text(self, scenes: list) -> str:
+        """Concatenate the natural-language fields of scenes/shots so the
+        guardrail word lists can run against the LLM output."""
+        parts: list[str] = []
+        for scene in scenes or []:
+            if getattr(scene, 'prompt', ''):
+                parts.append(scene.prompt)
+            if getattr(scene, 'narration', ''):
+                parts.append(scene.narration)
+            for shot in (getattr(scene, 'shots', None) or []):
+                if getattr(shot, 'prompt', ''):
+                    parts.append(shot.prompt)
+                if getattr(shot, 'narration', ''):
+                    parts.append(shot.narration)
+        return "\n".join(parts)
+
+    def _run_guardrails(self, text: str):
+        """Run all registered guardrails. Returns the list of GuardrailResult."""
+        from guardrails.registry import get_registry, register_defaults
+        register_defaults()  # idempotent: ensures the 3 default rules are loaded
+        return get_registry().check_all(text)
+
+    def _collect_violations(self, results) -> tuple[list[str], bool]:
+        """Return (human-readable violations, content_safety_hit) from results."""
+        violations: list[str] = []
+        hard_block = False
+        for r in results:
+            if not r.passed:
+                violations.extend(r.details)
+                if r.rule == 'content_safety':
+                    hard_block = True
+        return violations, hard_block
+
     def _continue_storyboard(self, project_id: str, state: WorkflowState, spec_data: dict) -> None:
         from shared.schemas import VideoSpec
         spec = VideoSpec.model_validate(spec_data)
@@ -184,8 +241,22 @@ class WorkflowRuntime:
         storyboard = self.agent.generate_storyboard(spec, brand)
         state.storyboard = storyboard
         self.workspace.write_artifact(project_id, 'default', 'storyboard.json', storyboard.model_dump())
-        # Pause for storyboard review
-        r2 = self.reviews.create_storyboard_review(project_id, storyboard.model_dump())
+
+        # Guardrail check on the generated storyboard content (HITL-friendly)
+        sb_text = self._gather_scene_text(storyboard.scenes)
+        sb_violations, sb_hard = self._collect_violations(self._run_guardrails(sb_text))
+        if sb_hard:
+            # Content-safety red line: hard block, do not proceed to review.
+            state.errors.append({'step': 'guardrail', 'message': 'Content safety violation in storyboard', 'details': sb_violations})
+            self._save_state(project_id, state)
+            get_event_bus().publish(Event(EVENT_PIPELINE_ERROR, {'project_id': project_id, 'error': 'Content safety violation in storyboard'}))
+            return
+
+        # Pause for storyboard review (non-safety violations attached for human sight)
+        sb_payload = storyboard.model_dump()
+        if sb_violations:
+            sb_payload['guardrail_violations'] = sb_violations
+        r2 = self.reviews.create_storyboard_review(project_id, sb_payload)
         state.paused = True
         state.meta['pause_review_id'] = r2.review_id
         state.meta['pause_stage'] = 'storyboard'
@@ -222,28 +293,62 @@ class WorkflowRuntime:
         self.workspace.write_artifact(project_id, run_id, 'scenes.json', [s.model_dump() for s in scenes])
         print(f'  [Scenes] {len(scenes)} scenes generated')
 
+        # Guardrail check before spending Kling credits (HITL-friendly)
+        scene_text = self._gather_scene_text(scenes)
+        scene_violations, scene_hard = self._collect_violations(self._run_guardrails(scene_text))
+        if scene_hard:
+            # Content-safety red line: hard block, do not generate video.
+            state.errors.append({'step': 'guardrail', 'message': 'Content safety violation in scenes', 'details': scene_violations})
+            self._save_state(project_id, state)
+            get_event_bus().publish(Event(EVENT_PIPELINE_ERROR, {'project_id': project_id, 'error': 'Content safety violation in scenes'}))
+            return
+
         self.projects.advance_stage(project_id, ProjectStage.VIDEO_PROD)
         clip_paths: dict[str, str] = {}
         clip_dir = self.workspace.artifacts_dir(project_id, run_id) / 'clips'
         clip_dir.mkdir(exist_ok=True)
 
         with stage_span("video_prod", {"project_id": project_id, "scene_count": len(scenes)}):
-            for i, scene in enumerate(scenes):
-                with lf.start_as_current_observation(name=f"video.clip_{i+1}", trace_context=_tctx, as_type="tool", end_on_exit=True):
-                    prompt = scene.prompt or f'Scene {i+1}: {scene.description}'
-                    task_id = self.video_provider.generate_clip(prompt, duration_sec=scene.duration_sec)
-                    clip_name = f'clip_{i+1:03d}.mp4'
-                    clip_path = str(clip_dir / clip_name)
-                    # download_result internally polls until the task is completed/failed/timed out
-                    result_path = self.video_provider.download_result(
-                        task_id, clip_path,
-                        duration_sec=scene.duration_sec,
-                    )
-                    if result_path:
-                        clip_paths[scene.scene_id or f'scene_{i}'] = result_path
-                        print(f'  [Video] Scene {i+1}: {result_path}')
-                    else:
-                        print(f'  [Video] Scene {i+1}: generation failed or timed out')
+            clip_idx = 0
+            for scene_i, scene in enumerate(scenes):
+                shots = scene.shots or []
+                if not shots:
+                    # No shots defined: generate one clip for the whole scene.
+                    clip_idx += 1
+                    with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
+                        prompt = scene.prompt or f'Scene {scene_i + 1}: {scene.description}'
+                        task_id = self.video_provider.generate_clip(prompt, duration_sec=scene.duration_sec)
+                        clip_name = f'clip_{clip_idx:03d}.mp4'
+                        clip_path = str(clip_dir / clip_name)
+                        result_path = self.video_provider.download_result(
+                            task_id, clip_path, duration_sec=scene.duration_sec,
+                        )
+                        if result_path:
+                            clip_paths[scene.scene_id or f'scene_{scene_i}'] = result_path
+                            print(f'  [Video] Clip {clip_idx} (scene {scene_i + 1}): {result_path}')
+                        else:
+                            print(f'  [Video] Clip {clip_idx} (scene {scene_i + 1}): generation failed or timed out')
+                    continue
+
+                # Generate one clip per shot so each shot is an independent cut.
+                for shot in shots:
+                    clip_idx += 1
+                    shot_id = shot.shot_id or f'shot_{clip_idx}'
+                    duration = shot.duration_sec or 5
+                    with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
+                        prompt = shot.prompt or shot.description or f'Scene {scene_i + 1} shot'
+                        task_id = self.video_provider.generate_clip(prompt, duration_sec=duration)
+                        clip_name = f'clip_{clip_idx:03d}.mp4'
+                        clip_path = str(clip_dir / clip_name)
+                        # download_result internally polls until the task is completed/failed/timed out
+                        result_path = self.video_provider.download_result(
+                            task_id, clip_path, duration_sec=duration,
+                        )
+                        if result_path:
+                            clip_paths[shot_id] = result_path
+                            print(f'  [Video] Clip {clip_idx} (shot {shot_id}): {result_path}')
+                        else:
+                            print(f'  [Video] Clip {clip_idx} (shot {shot_id}): generation failed or timed out')
 
         state.clips = clip_paths
         self._save_state(project_id, state)
@@ -256,7 +361,10 @@ class WorkflowRuntime:
                 'project_id': project_id, 'error': 'No clips generated'}))
             return
 
-        r3 = self.reviews.create_video_review(project_id, {'clips': clip_paths})
+        video_payload = {'clips': clip_paths}
+        if scene_violations:
+            video_payload['guardrail_violations'] = scene_violations
+        r3 = self.reviews.create_video_review(project_id, video_payload)
         state.paused = True
         state.meta['pause_review_id'] = r3.review_id
         state.meta['pause_stage'] = 'video_review'
@@ -279,14 +387,17 @@ class WorkflowRuntime:
         with stage_span("stitch", {"project_id": project_id, "clip_count": len(state.clips)}):
             voiceover_paths: list[str] = []
 
-            if state.scenes:
+            if state.scenes and state.clips:
                 from tools.tts import generate_narration
                 narration_dir = str(work_dir / 'narration')
                 audio_map = generate_narration(state.scenes, narration_dir)
-                for i, scene in enumerate(state.scenes):
-                    sid = scene.scene_id or f'scene_{i}'
-                    if sid in audio_map:
-                        voiceover_paths.append(audio_map[sid])
+                # Align voiceovers 1:1 with the clips that were actually produced.
+                # state.clips is keyed by shot_id (or scene_id for shot-less
+                # scenes) and ordered by playback order, so iterating its keys
+                # keeps audio and video in lockstep even if a shot failed.
+                for key in state.clips.keys():
+                    if key in audio_map:
+                        voiceover_paths.append(audio_map[key])
 
             srt_path = None
             if state.scenes:
@@ -307,6 +418,28 @@ class WorkflowRuntime:
 
         state.final_video_path = final_path
         print(f'  [Stitch] Final video: {final_path}')
+
+        # B1: collect generated assets into the asset library (non-fatal)
+        try:
+            from assets.service import AssetService
+            artifacts: dict[str, Any] = {}
+            spec = state.video_spec
+            if spec is not None:
+                artifacts['brand_profile'] = {
+                    'brand_name': getattr(spec, 'brand', '') or '',
+                    'product_description': getattr(spec, 'description', '') or '',
+                    'industry': getattr(spec, 'platform', '') or '',
+                }
+            if state.storyboard is not None:
+                artifacts['storyboard'] = state.storyboard.model_dump()
+            if state.clips:
+                artifacts['clips'] = state.clips
+            if artifacts:
+                created = AssetService().collect_project_assets(project_id, artifacts)
+                print(f'  [Assets] Collected {len(created)} assets for project {project_id}')
+        except Exception as exc:
+            print(f'  [Assets] Collection failed (non-fatal): {exc}')
+
         self.projects.advance_stage(project_id, ProjectStage.DONE)
         self._save_state(project_id, state)
         get_event_bus().publish(Event(EVENT_PIPELINE_COMPLETED, {

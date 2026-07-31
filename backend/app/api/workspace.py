@@ -1,15 +1,49 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from project.service import ProjectService
 from runtime.workflow import WorkflowRuntime
 from review.service import ReviewService
+from shared.exceptions import ProjectNotFoundError
+from shared.schemas import Project, ProjectStage
+from storage.database import get_db
+from storage.mysql.models import ProjectModel
 
 router = APIRouter()
 svc = ProjectService()
 reviews = ReviewService()
+
+
+async def _ensure_fs_project(project_id: str, db: AsyncSession) -> Project:
+    """Return filesystem project; if missing but present in DB, sync it."""
+    try:
+        return svc.get_project(project_id)
+    except ProjectNotFoundError:
+        pass
+
+    # Project not in filesystem repo; try to sync from SQL DB.
+    result = await db.execute(select(ProjectModel).where(ProjectModel.project_id == project_id))
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(404, f'Project not found: {project_id}')
+
+    project = Project(
+        project_id=model.project_id,
+        name=model.name,
+        brief=model.brief or '',
+        workflow_name=model.workflow_name or 'product_ad',
+        stage=ProjectStage(model.stage) if model.stage else ProjectStage.CREATED,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        archived_at=model.archived_at,
+        meta=model.meta_json or {},
+    )
+    svc.repo._save(project)
+    return project
 
 
 class RunRequest(BaseModel):
@@ -25,11 +59,8 @@ class RunResponse(BaseModel):
 
 
 @router.post('/run/{project_id}')
-async def run_pipeline(project_id: str, body: RunRequest) -> RunResponse:
-    try:
-        project = svc.get_project(project_id)
-    except Exception:
-        raise HTTPException(404, f'Project not found: {project_id}')
+async def run_pipeline(project_id: str, body: RunRequest, db: AsyncSession = Depends(get_db)) -> RunResponse:
+    await _ensure_fs_project(project_id, db)
 
     # Check if blocked by pending review
     if reviews.is_project_blocked(project_id):
@@ -58,7 +89,8 @@ async def run_pipeline(project_id: str, body: RunRequest) -> RunResponse:
 
 
 @router.post('/resume/{project_id}')
-async def resume_pipeline(project_id: str, review_id: str) -> RunResponse:
+async def resume_pipeline(project_id: str, review_id: str, db: AsyncSession = Depends(get_db)) -> RunResponse:
+    await _ensure_fs_project(project_id, db)
     runtime = WorkflowRuntime()
     try:
         result = runtime.resume(project_id, review_id)

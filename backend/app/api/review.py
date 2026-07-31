@@ -19,7 +19,7 @@ svc = ReviewService()
 
 @router.get('/', response_model=list[ReviewTask])
 async def list_reviews(project_id: str | None = None, status: str | None = None) -> list[ReviewTask]:
-    records = svc.list_pending(project_id) if status == 'pending' else svc.queue.list_reviews(project_id, status)
+    records = svc.list_reviews(project_id, status)
     return [_record_to_task(r) for r in records]
 
 
@@ -86,7 +86,7 @@ def _record_to_task(r) -> ReviewTask:
     return ReviewTask(
         review_id=r.review_id,
         project_id=r.project_id,
-        stage=ProjectStage(r.stage.value) if hasattr(r.stage, 'value') else ProjectStage.REVIEW,
+        stage=r.stage,
         status=ReviewDecision(r.status.value) if hasattr(r.status, 'value') else ReviewDecision.PENDING,
         content=r.content,
         comments=[{'text': c.text, 'action': c.action, 'reviewer': c.reviewer, 'created_at': str(c.created_at)} for c in r.comments],

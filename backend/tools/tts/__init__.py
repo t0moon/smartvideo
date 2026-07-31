@@ -7,6 +7,10 @@ from typing import Any
 
 from shared.schemas import Scene
 
+# Resolve ffmpeg/ffprobe to an absolute path so calls work even when the
+# launching process has no ffmpeg on its PATH (e.g. a WinGet temp install).
+from tools.ffmpeg import _resolve_bin
+
 
 def _get_tts_client():
     """Get OpenAI TTS client, reusing LLM credentials or dedicated TTS config."""
@@ -74,7 +78,7 @@ def _generate_silent_audio(text: str, output_path: str) -> str:
     duration = max(2.0, min(60.0, char_count / 4.0))
 
     cmd = [
-        'ffmpeg', '-y',
+        _resolve_bin('ffmpeg'), '-y',
         '-f', 'lavfi',
         '-i', f'anullsrc=channel_layout=mono:sample_rate=44100',
         '-t', f'{duration:.1f}',
@@ -90,25 +94,40 @@ def generate_narration(
     scenes: list[Scene],
     output_dir: str,
 ) -> dict[str, str]:
-    """Generate TTS narration audio for all scenes.
+    """Generate TTS narration audio for every shot, in playback order.
 
-    Returns a dict mapping scene_id -> audio file path.
+    Each shot gets its own audio clip so the final render can align a shot's
+    voiceover with its own generated video clip. Returns a dict mapping
+    ``shot_id -> audio file path`` (for scenes without shots, the scene_id is
+    used as the key instead).
+
+    Insertion order follows scene order then shot order within a scene, which
+    matches the clip concatenation order used by the workflow.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     audio_map: dict[str, str] = {}
-    for i, scene in enumerate(scenes):
-        scene_id = scene.scene_id or f'scene_{i}'
-        narration = ''
-        if scene.shots:
-            narration = ' '.join(s.narration for s in scene.shots if s.narration)
-        if not narration:
-            narration = scene.description or f'Scene {i + 1}'
+    idx = 0
+    for scene in scenes:
+        shots = scene.shots or []
+        if not shots:
+            # No shots defined: narrate the whole scene as one unit.
+            scene_id = scene.scene_id or f'scene_{idx}'
+            narration = scene.description or f'Scene {idx + 1}'
+            audio_path = str(output_dir / f'narration_{idx:03d}.mp3')
+            generate_tts(narration, audio_path)
+            audio_map[scene_id] = audio_path
+            idx += 1
+            continue
 
-        audio_path = str(output_dir / f'narration_{i:03d}.mp3')
-        generate_tts(narration, audio_path)
-        audio_map[scene_id] = audio_path
+        for shot in shots:
+            shot_id = shot.shot_id or f'shot_{idx}'
+            narration = shot.narration or shot.description or f'Shot {idx + 1}'
+            audio_path = str(output_dir / f'narration_{idx:03d}.mp3')
+            generate_tts(narration, audio_path)
+            audio_map[shot_id] = audio_path
+            idx += 1
 
     return audio_map
 
@@ -118,7 +137,7 @@ def get_audio_duration(path: str) -> float:
     try:
         result = subprocess.run(
             [
-                'ffprobe', '-v', 'quiet',
+                _resolve_bin('ffprobe'), '-v', 'quiet',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 path,

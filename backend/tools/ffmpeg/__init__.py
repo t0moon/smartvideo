@@ -1,12 +1,78 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 
+def _candidate_dirs() -> list[Path]:
+    """Directories that may contain the ffmpeg/ffprobe binaries."""
+    dirs: list[Path] = []
+    explicit = os.environ.get('FFMPEG_BIN') or ''
+    if explicit:
+        p = Path(explicit)
+        dirs.append(p.parent if p.name.lower().startswith('ffmpeg') else p)
+
+    # WinGet temp install (versioned, e.g. .../WinGet/Gyan.FFmpeg.x/extracted/ffmpeg-x/bin)
+    localappdata = os.environ.get('LOCALAPPDATA', '')
+    if localappdata:
+        wg = Path(localappdata) / 'Temp' / 'WinGet'
+        if wg.exists():
+            dirs.extend(wg.glob('*/*/ffmpeg-*/bin'))
+            dirs.extend(wg.glob('*/*/*/ffmpeg-*/bin'))
+
+    prog = os.environ.get('ProgramFiles', 'C:/Program Files')
+    prog86 = os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')
+    dirs += [
+        Path('C:/ffmpeg/bin'),
+        Path(prog) / 'ffmpeg' / 'bin',
+        Path(prog86) / 'ffmpeg' / 'bin',
+        Path('/opt/homebrew/bin'),
+        Path('/usr/local/bin'),
+        Path('/usr/bin'),
+    ]
+    return dirs
+
+
+def _resolve_bin(name: str) -> str:
+    """Return an absolute path to ``ffmpeg``/``ffprobe``.
+
+    Resolves from PATH first, then probes common install locations (WinGet
+    temp, Program Files, brew…). As a side effect it also prepends the found
+    directory to ``PATH`` so bare-name resolution works everywhere. Falls back
+    to the bare name so the subprocess call still surfaces a clear error if
+    nothing matches.
+
+    Resolving at *call time* (not import time) is deliberate: the backend
+    process that runs a pipeline may have a different PATH than the process
+    that first imported this module, and import-time PATH patching alone left
+    the render step silently failing with FileNotFoundError.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    for cdir in _candidate_dirs():
+        cdir = Path(cdir)
+        if not cdir.exists():
+            continue
+        exe = cdir / (name + '.exe') if os.name == 'nt' else cdir / name
+        if exe.exists():
+            existing = os.environ.get('PATH', '')
+            if str(cdir) not in existing:
+                os.environ['PATH'] = str(cdir) + os.pathsep + existing
+            print(f'  [FFmpeg] Auto-resolved {name} at: {cdir}')
+            return str(exe)
+    print(f'  [FFmpeg] WARNING: {name} not found on PATH and no common '
+          'install location matched. Set FFMPEG_BIN in .env to fix.')
+    return name
+
+
 def _run_ffmpeg(cmd: list[str], timeout: int = 300) -> tuple[bool, str]:
     """Run an ffmpeg command, return (success, stderr)."""
+    if cmd and cmd[0] in ('ffmpeg', 'ffprobe'):
+        cmd = [_resolve_bin(cmd[0]), *cmd[1:]]
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=timeout)
         return result.returncode == 0, result.stderr.decode('utf-8', errors='replace')
@@ -20,10 +86,11 @@ def _run_ffmpeg(cmd: list[str], timeout: int = 300) -> tuple[bool, str]:
 
 def get_video_duration(path: str) -> float:
     """Get video duration in seconds using ffprobe."""
+    ffprobe = _resolve_bin('ffprobe')
     try:
         result = subprocess.run(
             [
-                'ffprobe', '-v', 'quiet',
+                ffprobe, '-v', 'quiet',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 path,
@@ -96,7 +163,12 @@ def _concat_demuxer(video_paths: list[str], output_path: str) -> str:
         output_path,
     ]
     ok, err = _run_ffmpeg(cmd)
-    list_file.unlink(missing_ok=True)
+    try:
+        list_file.unlink(missing_ok=True)
+    except OSError:
+        # Safe-delete shims (sandbox) may block unlink; the temp list file is
+        # harmless and overwritten on the next run, so ignore the failure.
+        pass
     if not ok:
         print(f'  [FFmpeg] demuxer concat also failed: {err[:200]}')
     return output_path
@@ -111,15 +183,19 @@ def add_audio_track(video_path: str, audio_path: str, output_path: str) -> str:
     output_path = str(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # The video is the master timeline. Pad the voiceover with silence so the
+    # output length is locked to the (longer) video, not truncated to the
+    # narration length. `-shortest` then stops at the video duration.
     cmd = [
         'ffmpeg', '-y',
         '-i', video_path,
         '-i', audio_path,
+        '-filter_complex', '[1:a]apad[a]',
+        '-map', '0:v',
+        '-map', '[a]',
         '-c:v', 'copy',
         '-c:a', 'aac',
         '-b:a', '192k',
-        '-map', '0:v',
-        '-map', '1:a',
         '-shortest',
         output_path,
     ]
@@ -153,14 +229,16 @@ def mix_audio_tracks(
         inputs.extend(['-i', bgm_path])
 
     if bgm_path:
+        # Pad the voiceover to infinity so the mix length is driven by the
+        # video (via -shortest), not truncated to the narration length.
         filter_complex = (
-            f'[1:a]volume=1.0[voice];'
+            f'[1:a]apad[voice];'
             f'[2:a]volume={bgm_volume}[bgm];'
-            f'[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]'
+            f'[voice][bgm]amix=inputs=2:duration=longest:dropout_transition=2[aout]'
         )
         audio_map = '-map', '0:v', '-map', '[aout]'
     else:
-        filter_complex = '[1:a]volume=1.0[aout]'
+        filter_complex = '[1:a]apad[aout]'
         audio_map = '-map', '0:v', '-map', '[aout]'
 
     cmd = [
@@ -241,7 +319,12 @@ def concat_audio(audio_paths: list[str], output_path: str) -> str:
         output_path,
     ]
     ok, err = _run_ffmpeg(cmd, timeout=60)
-    list_file.unlink(missing_ok=True)
+    try:
+        list_file.unlink(missing_ok=True)
+    except OSError:
+        # Safe-delete shims (sandbox) may block unlink; ignore — temp file is
+        # overwritten on the next run.
+        pass
     if not ok:
         print(f'  [FFmpeg] concat_audio failed: {err[:200]}')
         import shutil

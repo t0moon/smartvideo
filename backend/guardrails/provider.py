@@ -32,8 +32,10 @@ class BaseGuardrail:
 class AdLawGuardrail(BaseGuardrail):
     name = "ad_law"
 
-    _ABSOLUTE_TERMS = ["zui", "di yi", "ding ji", "guo jia ji"]
-    _FORBIDDEN_TERMS = ["xu jia", "wei zao", "qi pian"]
+    # 广告法绝对化用语 / 虚假宣传违禁词（中文，与 LLM 产出语言一致）
+    _ABSOLUTE_TERMS = ["最好", "最佳", "最优", "第一", "顶级", "国家级", "唯一", "极致",
+                       "史上最", "行业第一", "销量第一", "领导品牌", "领导地位"]
+    _FORBIDDEN_TERMS = ["虚假", "伪造", "欺骗", "夸大", "绝对", "100%", "百分百", "保证效果"]
 
     def check(self, text: str, context: dict[str, Any] | None = None) -> GuardrailResult:
         violations: list[str] = []
@@ -56,7 +58,8 @@ class AdLawGuardrail(BaseGuardrail):
 class BrandTabooGuardrail(BaseGuardrail):
     name = "brand_taboo"
 
-    _COMMON_TABOO = ["jing pin", "lie zhi", "zhi liang cha"]
+    # 品牌禁忌：贬低竞品 / 暗示劣质等
+    _COMMON_TABOO = ["竞品", "劣质", "质量差", "假货", "山寨", "差评", "性价比低"]
 
     def check(self, text: str, context: dict[str, Any] | None = None) -> GuardrailResult:
         violations = [f'Brand taboo: "{t}"' for t in self._COMMON_TABOO if t in text.lower()]
@@ -73,7 +76,8 @@ class BrandTabooGuardrail(BaseGuardrail):
 class ContentSafetyGuardrail(BaseGuardrail):
     name = "content_safety"
 
-    _BLOCKED_CATEGORIES = ["bao li", "se qing", "zheng zhi min gan", "du bo", "du pin", "kong bu"]
+    # 内容安全红线：命中即硬阻断
+    _BLOCKED_CATEGORIES = ["暴力", "血腥", "色情", "政治敏感", "赌博", "毒品", "恐怖", "敏感"]
 
     def check(self, text: str, context: dict[str, Any] | None = None) -> GuardrailResult:
         violations = [f'Content safety: "{c}"' for c in self._BLOCKED_CATEGORIES if c in text.lower()]

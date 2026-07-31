@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from tools.ffmpeg import _resolve_bin
+
 from .base import BaseVideoProvider
 
 
@@ -24,7 +26,7 @@ class PlaceholderVideoProvider(BaseVideoProvider):
         color = kwargs.get('color', 'blue')
 
         cmd = [
-            'ffmpeg', '-y',
+            _resolve_bin('ffmpeg'), '-y',
             '-f', 'lavfi',
             '-i', f'color=c={color}:s={size}:d={duration_sec}:r=24',
             '-pix_fmt', 'yuv420p',

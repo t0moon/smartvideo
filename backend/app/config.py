@@ -66,3 +66,9 @@ FEISHU_APP_SECRET = os.getenv('FEISHU_APP_SECRET', '')
 FEISHU_ENABLED = bool(FEISHU_APP_ID and FEISHU_APP_SECRET)
 FEISHU_REVIEWER_OPEN_ID = os.getenv('FEISHU_REVIEWER_OPEN_ID', '')
 FEISHU_CALLBACK_MODE = (os.getenv('FEISHU_CALLBACK_MODE') or 'webhook').strip().lower()
+
+# ── FFmpeg ────────────────────────────────────────────────────
+# Optional explicit path to the ffmpeg binary. When unset, tools.ffmpeg
+# auto-detects common install locations (WinGet temp, Program Files, etc.)
+# so the backend does not depend on the launching shell's PATH.
+FFMPEG_BIN = os.getenv('FFMPEG_BIN', '')

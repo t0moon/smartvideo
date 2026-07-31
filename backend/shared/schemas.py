@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from shared.enums import ProjectStage, ReviewDecision, VideoStatus, AssetType
+from review.comment import ReviewStage
 
 
 # ©¤©¤ Project ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
@@ -112,7 +113,7 @@ class Asset(BaseModel):
 class ReviewTask(BaseModel):
     review_id: str = ''
     project_id: str = ''
-    stage: ProjectStage
+    stage: ReviewStage
     status: ReviewDecision = ReviewDecision.PENDING
     content: dict[str, Any] = Field(default_factory=dict)
     comments: list[dict[str, Any]] = Field(default_factory=list)
