@@ -22,6 +22,7 @@ from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_REVIEWER_OPEN_ID
 from channels.feishu.async_executor import run_async as _run_async
 from channels.feishu.client import FeishuClient
 from channels.feishu.messages import build_review_card
+from channels.feishu.review_content import format_review_content, STAGE_NAMES
 from project.service import ProjectService
 from review.service import ReviewService
 from events.bus import (
@@ -392,11 +393,29 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
 
 def send_review_card(project_id: str, stage: str, review_id: str,
                      project_name: str = "", review_content: str = "") -> None:
-    """Send the interactive approval card to the chat initiator (if any)."""
+    """Send the interactive approval card to the chat initiator (if any).
+
+    Before the action card, pushes the model's output content as a text
+    message so the user can read what was generated and make an informed
+    decision (approve / reject).
+    """
     if project_id not in _user_chat_map:
         print(f"  [Feishu-Card] No chat mapping for {project_id}, skip card")
         return
     sender, _ = _user_chat_map[project_id]
+
+    # ── 推送模型产出内容（在审批卡片之前） ──
+    stage_name = STAGE_NAMES.get(stage, stage)
+    try:
+        review = _svc.get_review(review_id)
+        if review and review.content:
+            content_text = format_review_content(stage, review.content)
+            if content_text:
+                header = f"\U0001f4cc {stage_name}\u7ed3\u679c\u5982\u4e0b\uff1a"
+                _run_async(_get_chat_client().send_text_message(sender, header + "\n" + content_text))
+    except Exception as exc:
+        print(f"  [Feishu-Card] Failed to send review content for {review_id}: {exc}")
+
     card = build_review_card(review_id, project_id, stage, project_name, review_content)
     try:
         _run_async(_get_chat_client().send_card(sender, card))

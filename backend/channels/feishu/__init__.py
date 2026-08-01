@@ -5,6 +5,8 @@ from typing import Any
 from channels.base import BaseChannel
 from channels.feishu.client import FeishuClient
 from channels.feishu.messages import build_review_card, build_status_card
+from channels.feishu.review_content import format_review_content, STAGE_NAMES
+from review.service import ReviewService
 from channels.feishu.ws_listener import (
     start_listener,
     stop_listener,
@@ -61,6 +63,20 @@ class FeishuChannel(BaseChannel):
         if not open_id:
             print("  [Feishu] No reviewer_open_id configured, skipping review notification")
             return {"status": "skipped", "channel": "feishu", "reason": "no_open_id"}
+
+        # ── 每个 HITL 节点：先推送模型产出内容，再发审批按钮卡片 ──
+        stage_name = STAGE_NAMES.get(stage, stage)
+        try:
+            svc = ReviewService()
+            review = svc.get_review(review_id)
+            if review and review.content:
+                content_text = format_review_content(stage, review.content)
+                if content_text:
+                    header = f"\U0001f4cc {stage_name}\u7ed3\u679c\u5982\u4e0b\uff1a"
+                    await client.send_text_message(open_id, header + "\n" + content_text)
+        except Exception as exc:
+            print(f"  [Feishu] Failed to send review content for {review_id}: {exc}")
+
         card = build_review_card(review_id, project_id, stage)
         result = await client.send_card(open_id, card)
         print(f"  [Feishu] Review card sent for {project_id} / {stage}")

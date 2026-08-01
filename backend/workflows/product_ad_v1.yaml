@@ -16,6 +16,8 @@ stages:
     name: Requirement Understanding
     agent: lead
     skill: requirement
+    tools:
+      - gather_requirement_context: { provider: tavily, max_results: 3 }
     next: storyboard
     pause_for_review: true
     inputs:
