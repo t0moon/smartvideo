@@ -262,10 +262,32 @@ class WorkflowRuntime:
         self.projects.advance_stage(project_id, ProjectStage.ASSET_PREP)
 
         from shared.schemas import VideoSpec
+        from shared.enums import AssetType
         spec_data = self.workspace.read_artifact(project_id, 'default', 'video_spec.json')
         spec = VideoSpec.model_validate(spec_data) if spec_data else VideoSpec()
         storyboard = Storyboard.model_validate(sb_data)
 
+        # ── Collect user-uploaded assets for the project ────────────────
+        uploaded: dict[str, list[dict]] = {}
+        try:
+            from assets.service import AssetService
+            svc = AssetService()
+            for atype, label in [(AssetType.IMAGE, 'product_images'),
+                                 (AssetType.CHARACTER, 'characters'),
+                                 (AssetType.VOICE, 'voice_samples'),
+                                 (AssetType.BGM, 'bgm_tracks')]:
+                items = svc.list_assets(asset_type=atype, project_id=project_id)
+                if items:
+                    uploaded[label] = [{
+                        'name': a.name, 'file_path': a.file_path,
+                        'asset_id': a.asset_id, 'mime_type': getattr(a, 'mime_type', ''),
+                    } for a in items]
+            if uploaded:
+                print(f'  [AssetPrep] Found user uploads: {list(uploaded.keys())}')
+        except Exception as exc:
+            print(f'  [AssetPrep] Asset lookup skipped: {exc}')
+
+        # ── Build review payload with both suggestions and uploads ─────
         asset_payload = {
             'type': 'asset_prep',
             'suggested_characters': [
@@ -280,6 +302,7 @@ class WorkflowRuntime:
             'suggested_brand': getattr(spec, 'brand', '') or 'TBD',
             'platform': getattr(spec, 'platform', '') or 'TBD',
             'style_notes': getattr(storyboard, 'style_notes', ''),
+            'user_uploads': uploaded,
         }
 
         from skills.loader import get_skill_prompt as _gsp
@@ -348,15 +371,37 @@ class WorkflowRuntime:
         clip_dir = self.workspace.artifacts_dir(project_id, run_id) / 'clips'
         clip_dir.mkdir(exist_ok=True)
 
+        # Collect user-uploaded reference images as fallback for scenes that
+        # don't have their own reference_image set.
+        user_refs: list[str] = []
+        try:
+            from assets.service import AssetService
+            from shared.enums import AssetType
+            svc = AssetService()
+            img_assets = svc.list_assets(asset_type=AssetType.IMAGE, project_id=project_id)
+            user_refs = [a.file_path for a in img_assets if a.file_path]
+        except Exception:
+            pass
+        fallback_ref = user_refs[0] if user_refs else ''
+
         with stage_span("video_prod", {"project_id": project_id, "scene_count": len(scenes)}):
             clip_idx = 0
             for scene_i, scene in enumerate(scenes):
+                # Resolve reference image: scene field > uploaded asset > empty
+                ref_img = getattr(scene, 'reference_image', '') or ''
+                if not ref_img:
+                    ref_img = fallback_ref
+                shot_ref = ref_img  # per-scene ref; shots inherit unless overridden
+
                 shots = scene.shots or []
                 if not shots:
                     clip_idx += 1
                     with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
                         prompt = scene.prompt or f'Scene {scene_i + 1}: {scene.description}'
-                        task_id = self.video_provider.generate_clip(prompt, duration_sec=scene.duration_sec)
+                        kwargs: dict = {'duration_sec': scene.duration_sec}
+                        if ref_img:
+                            kwargs['reference_image'] = ref_img
+                        task_id = self.video_provider.generate_clip(prompt, **kwargs)
                         clip_name = f'clip_{clip_idx:03d}.mp4'
                         clip_path = str(clip_dir / clip_name)
                         result_path = self.video_provider.download_result(
@@ -364,7 +409,7 @@ class WorkflowRuntime:
                         )
                         if result_path:
                             clip_paths[scene.scene_id or f'scene_{scene_i}'] = result_path
-                            print(f'  [Video] Clip {clip_idx} (scene {scene_i + 1}): {result_path}')
+                            print(f'  [Video] Clip {clip_idx} (scene {scene_i + 1}){" [ref-img]" if ref_img else ""}: {result_path}')
                         else:
                             print(f'  [Video] Clip {clip_idx} (scene {scene_i + 1}): generation failed or timed out')
                     continue
@@ -375,7 +420,10 @@ class WorkflowRuntime:
                     duration = shot.duration_sec or 5
                     with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
                         prompt = shot.prompt or shot.description or f'Scene {scene_i + 1} shot'
-                        task_id = self.video_provider.generate_clip(prompt, duration_sec=duration)
+                        kwargs = {'duration_sec': duration}
+                        if shot_ref:
+                            kwargs['reference_image'] = shot_ref
+                        task_id = self.video_provider.generate_clip(prompt, **kwargs)
                         clip_name = f'clip_{clip_idx:03d}.mp4'
                         clip_path = str(clip_dir / clip_name)
                         result_path = self.video_provider.download_result(
@@ -383,7 +431,7 @@ class WorkflowRuntime:
                         )
                         if result_path:
                             clip_paths[shot_id] = result_path
-                            print(f'  [Video] Clip {clip_idx} (shot {shot_id}): {result_path}')
+                            print(f'  [Video] Clip {clip_idx} (shot {shot_id}){" [ref-img]" if shot_ref else ""}: {result_path}')
                         else:
                             print(f'  [Video] Clip {clip_idx} (shot {shot_id}): generation failed or timed out')
 

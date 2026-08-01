@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import time
 import requests
 from pathlib import Path
@@ -47,9 +48,13 @@ class KlingVideoProvider(BaseVideoProvider):
     # ------------------------------------------------------------------
 
     def generate_clip(self, prompt: str, **kwargs) -> str:
-        """Submit a text-to-video generation task.
+        """Submit a video generation task (text-to-video or image-to-video).
 
-        Returns the task_id (or external_task_id) used for polling.
+        When ``reference_image`` kwarg is provided (local path or URL), the
+        image-to-video endpoint is used for motion-driven generation from a
+        reference frame.  Otherwise the text-to-video endpoint is used.
+
+        Returns the task_id used for polling.
         """
         duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
         aspect_ratio = kwargs.get('aspect_ratio', self.default_aspect)
@@ -58,33 +63,40 @@ class KlingVideoProvider(BaseVideoProvider):
         callback_url = kwargs.get('callback_url', '')
         external_task_id = kwargs.get('external_task_id', '')
         watermark = kwargs.get('watermark', False)
+        reference_image = kwargs.get('reference_image', '')
 
-        payload: dict[str, Any] = {
-            'prompt': prompt,
-            'settings': {
-                'resolution': resolution,
-                'aspect_ratio': aspect_ratio,
-                'duration': int(duration),
-                'audio': audio,
-            },
-            'options': {
-                'watermark_info': {'enabled': bool(watermark)},
-            },
+        settings: dict[str, Any] = {
+            'resolution': resolution,
+            'aspect_ratio': aspect_ratio,
+            'duration': int(duration),
+            'audio': audio,
         }
-
+        options: dict[str, Any] = {'watermark_info': {'enabled': bool(watermark)}}
         if callback_url:
-            payload['options']['callback_url'] = callback_url
+            options['callback_url'] = callback_url
         if external_task_id:
-            payload['options']['external_task_id'] = external_task_id
+            options['external_task_id'] = external_task_id
 
-        # New Kling API path: /text-to-video/{model}
-        path = f'/text-to-video/{self.model}'
+        # ── Image-to-video path ─────────────────────────────────────────
+        if reference_image:
+            image_payload = self._prepare_image(reference_image)
+            path = f'/image-to-video/{self.model}'
+            payload: dict[str, Any] = {
+                'image': image_payload,
+                'settings': settings,
+                'options': options,
+            }
+            if prompt and prompt.strip():
+                payload['prompt'] = prompt.strip()
+            print(f'  [Kling] Image-to-video task (ref: {reference_image[:60]}...)')
+        else:
+            path = f'/text-to-video/{self.model}'
+            payload = {'prompt': prompt, 'settings': settings, 'options': options}
+
         resp = self._request('POST', path, json=payload)
         task_id = self._extract_field(resp, 'id')
-
         if not task_id:
             task_id = self._extract_field(resp, 'task_id')
-
         if not task_id:
             raise RuntimeError(f'Kling task creation failed: {resp}')
 
@@ -163,6 +175,25 @@ class KlingVideoProvider(BaseVideoProvider):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _prepare_image(self, image_ref: str) -> str:
+        """Return a Kling-compatible image payload from *image_ref*.
+
+        - URLs (http/https) are passed through as-is.
+        - Local file paths are base64-encoded with a MIME prefix so Kling
+          can decode them without storing them in a public bucket first.
+        """
+        if image_ref.startswith(('http://', 'https://')):
+            return image_ref
+        img_path = Path(image_ref)
+        if not img_path.exists():
+            raise FileNotFoundError(f'Reference image not found: {image_ref}')
+        raw = img_path.read_bytes()
+        ext = img_path.suffix.lower().lstrip('.')
+        mime_map = {'jpg': 'jpeg', 'jpeg': 'jpeg', 'png': 'png', 'webp': 'webp'}
+        mime = mime_map.get(ext, 'png')
+        b64 = base64.b64encode(raw).decode('ascii')
+        return f'data:image/{mime};base64,{b64}'
 
     def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         """Make an authenticated request to the Kling API."""

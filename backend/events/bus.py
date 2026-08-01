@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -50,10 +51,22 @@ class EventBus:
 
         # Publish to specific type subscribers
         for handler in self._subscribers.get(event.event_type, []):
-            handler(event)
+            try:
+                handler(event)
+            except Exception:
+                # A failing subscriber must NOT silently break the chain nor
+                # swallow the real error ¡X surface it with a full traceback so
+                # pipeline-pause notification bugs (e.g. a missing Feishu card)
+                # are diagnosable instead of looking like "no reaction".
+                print(f"  [EventBus] subscriber error for {event.event_type}:")
+                traceback.print_exc()
         # Publish to wildcard subscribers
         for handler in self._subscribers.get('*', []):
-            handler(event)
+            try:
+                handler(event)
+            except Exception:
+                print("  [EventBus] wildcard subscriber error:")
+                traceback.print_exc()
 
     def get_history(self, event_type: str | None = None, limit: int = 50) -> list[Event]:
         events = self._history
