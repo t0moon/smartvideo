@@ -39,6 +39,7 @@ class AssetType(str, Enum):
     IMAGE = 'image'
     VIDEO = 'video'
     SUBTITLE = 'subtitle'
+    BGM = 'bgm'  # 用户上传的配乐
 
 
 class SkillType(str, Enum):

@@ -50,6 +50,9 @@ def _resolve_bin(name: str) -> str:
     that first imported this module, and import-time PATH patching alone left
     the render step silently failing with FileNotFoundError.
     """
+    explicit = os.environ.get('FFMPEG_BIN' if name == 'ffmpeg' else 'FFPROBE_BIN') or ''
+    if explicit and os.path.isfile(explicit):
+        return explicit
     found = shutil.which(name)
     if found:
         return found

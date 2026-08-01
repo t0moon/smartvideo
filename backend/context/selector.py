@@ -20,6 +20,11 @@ _STAGE_CONFIGS: dict[str, dict[str, Any]] = {
         'produces': ['scenes'],
         'providers': ['project'],
     },
+    'asset_prep': {
+        'inputs': ['storyboard', 'video_spec'],
+        'produces': ['assets'],
+        'providers': ['project'],
+    },
     'video_gen': {
         'inputs': ['scenes'],
         'produces': ['clips'],
@@ -34,6 +39,11 @@ _STAGE_CONFIGS: dict[str, dict[str, Any]] = {
         'inputs': ['video_spec', 'storyboard', 'clips'],
         'produces': [],
         'providers': ['project', 'review'],
+    },
+    'publish': {
+        'inputs': ['final_video'],
+        'produces': ['publish_result'],
+        'providers': ['project'],
     },
 }
 

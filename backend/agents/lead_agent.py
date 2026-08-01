@@ -75,13 +75,17 @@ class LeadAgent:
             return skill_text.strip()
         return self._load_prompt(stage_name)
 
-    def understand_requirement(self, brief: str) -> VideoSpec:
+    def understand_requirement(self, brief: str, search_context: str = '') -> VideoSpec:
         system = self._build_system('requirement')
         if not system:
             system = 'Extract video specification from the user brief. Return a JSON object.'
+        user_content = brief
+        # Inject any web-search context gathered for the requirement stage.
+        if search_context:
+            user_content += '\n\n' + search_context
         messages = [
             {'role': 'system', 'content': system},
-            {'role': 'user', 'content': brief},
+            {'role': 'user', 'content': user_content},
         ]
         start = time.perf_counter()
         try:
@@ -98,13 +102,19 @@ class LeadAgent:
             get_metrics().increment('llm.error', {'method': 'understand_requirement'})
             return VideoSpec(raw_brief=brief)
 
-    def generate_storyboard(self, spec: VideoSpec, brand: BrandProfile | None = None) -> Storyboard:
+    def generate_storyboard(self, spec: VideoSpec, brand: BrandProfile | None = None, feedback: str = '') -> Storyboard:
         system = self._build_system('storyboard')
         if not system:
             system = 'Generate a storyboard from the video specification.'
         context = f'Video Spec:\n{spec.model_dump_json(indent=2)}\n'
         if brand:
             context += f'\nBrand Profile:\n{brand.model_dump_json(indent=2)}'
+        # Human-in-the-loop feedback from a previous review round.
+        if feedback:
+            context += (
+                '\n\n## 上一轮审核的用户修改意见（请据此修订，保留用户认可的部分，'
+                '仅修改被指出的问题）\n' + feedback
+            )
         messages = [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': context},
@@ -119,13 +129,17 @@ class LeadAgent:
             get_metrics().increment('llm.error', {'method': 'generate_storyboard'})
             return Storyboard()
 
-    def generate_scenes(self, storyboard: Storyboard, brand: BrandProfile | None = None) -> list[Scene]:
+    def generate_scenes(self, storyboard: Storyboard, brand: BrandProfile | None = None, feedback: str = '') -> list[Scene]:
         system = self._build_system('scene')
         if not system:
             system = 'Generate detailed scene descriptions from the storyboard.'
         context = f'Storyboard:\n{storyboard.model_dump_json(indent=2)}\n'
         if brand:
             context += f'\nBrand:\n{brand.model_dump_json(indent=2)}'
+        if feedback:
+            context += (
+                '\n\n## 用户修改意见（请据此调整场景/镜头设计）\n' + feedback
+            )
         messages = [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': context},

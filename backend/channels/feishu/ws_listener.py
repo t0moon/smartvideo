@@ -9,6 +9,7 @@ Supports IM chat: users can send messages to the bot to create video projects.
 from __future__ import annotations
 
 import json
+import time
 import threading
 from typing import Any
 
@@ -36,6 +37,40 @@ _user_chat_map: dict[str, tuple[str, str]] = {}
 _ws_client = None
 _ws_thread: threading.Thread | None = None
 _chat_client: FeishuClient | None = None
+
+# ── message / brief dedup (idempotency) ────────────────────────────────────
+# Feishu may retry or re-deliver events on network blips / WS reconnect.
+# Users may also accidentally send the same brief twice. Both are caught here.
+
+_SEEN_TTL = 600                 # forget message IDs after 10 min
+_BRIEF_DUP_WINDOW = 5           # block identical briefs within 5 s
+_seen_message_ids: dict[str, float] = {}    # {message_id: expire_timestamp}
+_recent_briefs: dict[str, float] = {}       # {f'{sender}:{brief}': expire_ts}
+
+
+def _is_duplicate_message(message_id: str) -> bool:
+    """Return True if *message_id* was already processed in this session."""
+    now = time.time()
+    stale = [k for k, v in _seen_message_ids.items() if v < now]
+    for k in stale:
+        _seen_message_ids.pop(k, None)
+    if message_id in _seen_message_ids:
+        return True
+    _seen_message_ids[message_id] = now + _SEEN_TTL
+    return False
+
+
+def _is_duplicate_brief(sender: str, brief: str) -> bool:
+    """Return True if *sender* posted the same *brief* in the last few seconds."""
+    now = time.time()
+    key = f'{sender}:{brief.strip()}'
+    stale = [k for k, v in _recent_briefs.items() if v < now]
+    for k in stale:
+        _recent_briefs.pop(k, None)
+    if key in _recent_briefs:
+        return True
+    _recent_briefs[key] = now + _BRIEF_DUP_WINDOW
+    return False
 
 
 def _get_chat_client() -> FeishuClient:
@@ -194,7 +229,15 @@ def _handle_text_approval(sender: str, message_id: str, text: str, approve: bool
 
 
 def _handle_im_message(event: dict) -> None:
-    """Process an incoming IM message and kick off a video project."""
+    """Process an incoming IM message and kick off a video project.
+
+    Idempotency guarantees:
+    - message_id TTL cache — same event re-delivered by Feishu is skipped.
+    - brief dedup window — same sender+text within 5s returns a hint instead
+      of creating a duplicate project.
+    - project is created BEFORE the user-facing ack, so the reply already
+      carries the project_id.
+    """
     message = event.get("message", {})
     sender = event.get("sender", {}).get("sender_id", {}).get("open_id", "")
     message_id = message.get("message_id", "")
@@ -212,6 +255,11 @@ def _handle_im_message(event: dict) -> None:
         text = content_raw.strip()
 
     if not text:
+        return
+
+    # ── Idempotency gate 1: duplicate message_id (Feishu retry / WS replay) ─
+    if _is_duplicate_message(message_id):
+        print(f"  [Feishu-Chat] Duplicate message_id {message_id} — skipped")
         return
 
     print(f"  [Feishu-Chat] Received from {sender}: {text[:80]}")
@@ -236,29 +284,31 @@ def _handle_im_message(event: dict) -> None:
     if lower in approve_words or lower in reject_words:
         if _handle_text_approval(sender, message_id, text, approve=(lower in approve_words)):
             return
-        # No pending review — fall through and tell the user.
         try:
             _run_async(client.reply_to_message(message_id, "当前没有待审批的项目，无法处理该指令。"))
         except Exception as exc:
             print(f"  [Feishu-Chat] No-pending-review reply failed: {exc}")
         return
 
-    # Reply acknowledgment
-    try:
-        _run_async(client.reply_to_message(message_id, "收到您的需求！正在创建视频项目，请稍候...\n📝 正在理解需求"))
-    except Exception as e:
-        print(f"  [Feishu-Chat] Ack reply failed (check im:message permission): {e}")
+    # ── Idempotency gate 2: duplicate brief within the dedup window ──────
+    if _is_duplicate_brief(sender, text):
+        try:
+            _run_async(client.reply_to_message(
+                message_id,
+                "您刚发送了相同需求，正在处理中，请稍候查看审批通知...\n如需重新提交，请稍等几秒后再试。"
+            ))
+        except Exception as exc:
+            print(f"  [Feishu-Chat] Dup-brief reply failed: {exc}")
+        return
 
-    # Create project with the message text as brief
+    # ── Create project FIRST (so the ack reply carries the project_id) ───
+    pid = ""
     try:
         project_name = text[:50] + ("..." if len(text) > 50 else "")
         project = _proj.create_project(name=project_name, brief=text)
         pid = project.project_id
 
-        # Store user mapping so pipeline events can send status updates / cards
         _user_chat_map[pid] = (sender, message_id)
-
-        # Update project meta with the Feishu sender info
         _proj.update_project(pid, {
             "meta": {
                 **project.meta,
@@ -266,17 +316,25 @@ def _handle_im_message(event: dict) -> None:
                 "feishu_message_id": message_id,
             }
         })
-
         print(f"  [Feishu-Chat] Created project {pid} for {sender}")
     except Exception as exc:
         print(f"  [Feishu-Chat] Failed to create project: {exc}")
         try:
-            _run_async(client.reply_to_message(message_id, f"❌ 创建项目失败：{exc}"))
+            _run_async(client.reply_to_message(message_id, f"创建项目失败：{exc}"))
         except Exception:
             pass
         return
 
-    # Run pipeline in a background thread (must return within 3s)
+    # ── Reply with project_id (user sees which project was created) ──────
+    try:
+        _run_async(client.reply_to_message(
+            message_id,
+            f"收到您的需求！正在创建视频项目，请稍候...\n项目 ID: `{pid}`\n📝 正在理解需求"
+        ))
+    except Exception as e:
+        print(f"  [Feishu-Chat] Ack reply failed (check im:message permission): {e}")
+
+    # ── Run pipeline in background (must return within 3s) ───────────────
     t = threading.Thread(target=_run_pipeline_and_notify, args=(pid, text, message_id), daemon=True)
     t.start()
 
@@ -368,7 +426,9 @@ def _on_pipeline_paused(event: Event) -> None:
     stage_names = {
         "requirement": "需求理解",
         "storyboard": "分镜脚本",
+        "asset_prep":  "资产确认",
         "video_review": "视频审核",
+        "video_gen": "视频生成",
     }
     stage_cn = stage_names.get(stage, stage)
 

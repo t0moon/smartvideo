@@ -10,6 +10,7 @@ uvicorn[standard]>=0.27.0
 websockets>=12.0
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
+python-multipart>=0.0.9  # required for UploadFile / Form endpoints (asset upload)
 
 # LLM
 openai>=1.0.0

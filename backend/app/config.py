@@ -72,3 +72,26 @@ FEISHU_CALLBACK_MODE = (os.getenv('FEISHU_CALLBACK_MODE') or 'webhook').strip().
 # auto-detects common install locations (WinGet temp, Program Files, etc.)
 # so the backend does not depend on the launching shell's PATH.
 FFMPEG_BIN = os.getenv('FFMPEG_BIN', '')
+
+# ── Search (Requirement augmentation) ────────────────────────
+# Pluggable web-search provider used to enrich the requirement analysis
+# stage with real-world product / competitor / audience context.
+# Set SEARCH_PROVIDER=tavily and TAVILY_API_KEY to enable. Any other value
+# (or a missing key) degrades gracefully to a no-op so the pipeline still
+# runs without external calls.
+SEARCH_PROVIDER = (os.getenv('SEARCH_PROVIDER') or 'none').strip().lower()
+TAVILY_API_KEY = os.getenv('TAVILY_API_KEY', '')
+SEARCH_MAX_RESULTS = int(os.getenv('SEARCH_MAX_RESULTS', '3'))
+SEARCH_ENABLED = SEARCH_PROVIDER == 'tavily' and bool(TAVILY_API_KEY)
+
+# ── Upload limits (用户素材上传) ──────────────────────────────
+UPLOAD_MAX_SIZE_MB = int(os.getenv('UPLOAD_MAX_SIZE_MB', '20'))
+# Allowed extensions per asset type (whitelist; anything else is rejected).
+UPLOAD_ALLOWED_EXT: dict[str, set[str]] = {
+    'image': {'.jpg', '.jpeg', '.png', '.webp', '.bmp'},
+    'character': {'.jpg', '.jpeg', '.png', '.webp'},
+    'voice': {'.wav', '.mp3', '.m4a', '.ogg'},
+    'bgm': {'.mp3', '.wav', '.m4a', '.ogg', '.flac'},
+}
+UPLOAD_DIR = ASSETS_DIR / 'uploads'
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

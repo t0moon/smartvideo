@@ -40,6 +40,48 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)) -> Pr
     return _model_to_schema(model)
 
 
+@router.get('/{project_id}/status')
+async def get_project_status(project_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """Return the resumable state of a project's pipeline.
+
+    需求一A (HITL continuity): when a pipeline is interrupted at a node, the
+    workflow state is persisted to ``workflow_state.json``. This endpoint lets
+    the frontend know whether the project is mid-flight (paused) and which
+    review id to resume from, so the user gets an explicit "继续项目" button
+    instead of silently losing context.
+
+    Returns:
+        {
+          project_id, stage, paused, pause_stage,
+          pause_review_id, has_state, blocked
+        }
+    """
+    model = await _get_project_or_404(project_id, db)
+    from workspace.manager import WorkspaceManager
+    wm = WorkspaceManager()
+    state_data = wm.read_artifact(project_id, 'default', 'workflow_state.json')
+    if not state_data:
+        return {
+            'project_id': project_id,
+            'stage': model.stage,
+            'paused': False,
+            'pause_stage': '',
+            'pause_review_id': '',
+            'has_state': False,
+            'blocked': False,
+        }
+    meta = state_data.get('meta', {}) or {}
+    return {
+        'project_id': project_id,
+        'stage': state_data.get('current_stage') or model.stage,
+        'paused': bool(state_data.get('paused')),
+        'pause_stage': meta.get('pause_stage', ''),
+        'pause_review_id': meta.get('pause_review_id', ''),
+        'has_state': True,
+        'blocked': False,
+    }
+
+
 @router.patch('/{project_id}', response_model=Project)
 async def update_project(project_id: str, body: dict[str, Any], db: AsyncSession = Depends(get_db)) -> Project:
     model = await _get_project_or_404(project_id, db)

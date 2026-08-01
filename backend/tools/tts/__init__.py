@@ -68,8 +68,7 @@ def generate_tts(
         except Exception as exc:
             print(f'  [TTS] API error, using silent fallback: {exc}')
 
-    _generate_silent_audio(text, output_path)
-    return output_path
+    return _generate_silent_audio(text, output_path)
 
 
 def _generate_silent_audio(text: str, output_path: str) -> str:
@@ -85,7 +84,13 @@ def _generate_silent_audio(text: str, output_path: str) -> str:
         '-q:a', '9',
         output_path,
     ]
-    subprocess.run(cmd, capture_output=True, timeout=30)
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=30)
+    except Exception as exc:
+        # Never let a missing/!broken ffmpeg kill the whole stitch. Degrade to
+        # "no voiceover for this shot" instead of raising an opaque WinError 2.
+        print(f'  [TTS] Silent fallback failed (ffmpeg unavailable): {exc}')
+        return None
     print(f'  [TTS] Silent fallback: {output_path} ({duration:.1f}s)')
     return output_path
 
@@ -116,8 +121,9 @@ def generate_narration(
             scene_id = scene.scene_id or f'scene_{idx}'
             narration = scene.description or f'Scene {idx + 1}'
             audio_path = str(output_dir / f'narration_{idx:03d}.mp3')
-            generate_tts(narration, audio_path)
-            audio_map[scene_id] = audio_path
+            audio_path = generate_tts(narration, audio_path)
+            if audio_path:
+                audio_map[scene_id] = audio_path
             idx += 1
             continue
 
@@ -125,8 +131,9 @@ def generate_narration(
             shot_id = shot.shot_id or f'shot_{idx}'
             narration = shot.narration or shot.description or f'Shot {idx + 1}'
             audio_path = str(output_dir / f'narration_{idx:03d}.mp3')
-            generate_tts(narration, audio_path)
-            audio_map[shot_id] = audio_path
+            audio_path = generate_tts(narration, audio_path)
+            if audio_path:
+                audio_map[shot_id] = audio_path
             idx += 1
 
     return audio_map

@@ -49,6 +49,9 @@ export default function ReviewCard({ review, onResolved }: { review: ReviewTask;
     video_review: 'Video Review',
   }
 
+  // content is free-form review payload; loosen typing for display access.
+  const content = review.content as Record<string, any>
+
   return (
     <div style={{
       border: '2px solid #f59e0b', borderRadius: 8, padding: 20,
@@ -65,14 +68,27 @@ export default function ReviewCard({ review, onResolved }: { review: ReviewTask;
       </div>
 
       {/* Show content preview */}
-      {review.content?.spec && (
+      {content?.spec && (
         <div style={{ fontSize: 13, color: '#666', marginBottom: 12, background: '#fff', padding: 10, borderRadius: 6 }}>
-          <strong>Video Spec:</strong> `{review.content.spec.duration_sec || '-'}s`, Style: `{review.content.spec.style || '-'}`
+          <strong>Video Spec:</strong> `{content.spec.duration_sec || '-'}s`, Style: `{content.spec.style || '-'}`
         </div>
       )}
-      {review.content?.storyboard?.scenes && (
+      {content?.storyboard?.scenes && (
         <div style={{ fontSize: 13, color: '#666', marginBottom: 12, background: '#fff', padding: 10, borderRadius: 6 }}>
-          <strong>Storyboard:</strong> `{review.content.storyboard.scenes.length}` scenes
+          <strong>Storyboard:</strong> `{content.storyboard.scenes.length}` scenes
+        </div>
+      )}
+
+      {/* 需求一B: 人类可读故事板（用户可直接阅读/修改后继续） */}
+      {review.stage === 'storyboard' && content?.readable_text && (
+        <div style={{
+          fontSize: 13, color: '#444', marginBottom: 12, background: '#fff',
+          padding: 12, borderRadius: 6, border: '1px solid #fde68a',
+          whiteSpace: 'pre-wrap', lineHeight: 1.6,
+          maxHeight: 360, overflowY: 'auto',
+        }}>
+          <strong style={{ display: 'block', marginBottom: 6, color: '#92400e' }}>📋 故事板（可读版）：</strong>
+          {content.readable_text}
         </div>
       )}
 

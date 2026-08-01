@@ -41,6 +41,14 @@ class VideoSpec(BaseModel):
     subtitle_enabled: bool = True
     raw_brief: str = ''
     extra: dict[str, Any] = Field(default_factory=dict)
+    # ¢w¢w ÆÎ§i?ž²´¡¼Ñ¡]»Ý¨D¤ÀªR?¬q¥Ñ LLM ŸÏ brief ¶ñ¥R¡^¢w¢w¢w¢w¢w¢w¢w¢w¢w¢w¢w¢w¢w¢w
+    product_name: str = ''          # ?«~¦W?
+    ad_appeal: str = ''             # ÆÎ§i?¨D¡]©ÊÉ²¤ñ/«~?·P/±¡·P¦@?/¥\¯à®i¥Ü¡K¡^
+    target_audience: str = ''       # ¥Ø?¤H¸sœ{¹³
+    has_real_person: bool = False   # ¬O§_¯u¤H¥X?
+    key_selling_points: list[str] = Field(default_factory=list)  # ®Ö¤ß?˜ò
+    competitors: list[str] = Field(default_factory=list)         # ?«~‰ë¦Ò
+    tone_of_voice: str = ''         # ¤å®×?Éa¡]¤ñ style §óºëÚÌ¡^
 
 
 # ©¤©¤ Storyboard / Scene / Shot ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤

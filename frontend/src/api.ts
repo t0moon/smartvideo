@@ -55,6 +55,22 @@ export async function updateProject(id: string, updates: Record<string, unknown>
   return res.json()
 }
 
+export interface ProjectStatus {
+  project_id: string
+  stage: string
+  paused: boolean
+  pause_stage: string
+  pause_review_id: string
+  has_state: boolean
+  blocked: boolean
+}
+
+export async function getProjectStatus(id: string): Promise<ProjectStatus> {
+  const res = await fetch(`${API_BASE}/projects/${id}/status`)
+  if (!res.ok) throw new Error(`Failed to get project status: ${res.status}`)
+  return res.json()
+}
+
 
 // ── Review API ──────────────────────────────────────────
 
@@ -161,4 +177,38 @@ export async function searchAssets(q: string): Promise<Asset[]> {
 export async function deleteAsset(id: string): Promise<void> {
   const res = await fetch('`/api/v1/assets/`' + id, { method: 'DELETE' })
   if (!res.ok) throw new Error('`Failed to delete asset: `' + res.status)
+}
+
+export type UploadAssetType = 'image' | 'character' | 'voice' | 'bgm'
+
+export async function uploadAsset(
+  projectId: string,
+  assetType: UploadAssetType,
+  file: File,
+  name = '',
+): Promise<Asset> {
+  const form = new FormData()
+  form.append('project_id', projectId)
+  form.append('asset_type', assetType)
+  form.append('name', name)
+  form.append('file', file)
+  const res = await fetch('`/api/v1/assets/upload`', { method: 'POST', body: form })
+  if (!res.ok) {
+    let msg = '`Upload failed: `' + res.status
+    try { const j = await res.json(); if (j.detail) msg = j.detail } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+  return res.json()
+}
+
+export interface UploadedAsset {
+  asset_id: string
+  project_id: string
+  asset_type: string
+  name: string
+  description: string
+  file_path: string
+  tags: string[]
+  metadata: Record<string, unknown>
+  created_at: string
 }

@@ -7,7 +7,7 @@ from typing import Any
 from project.service import ProjectService
 from workspace.manager import WorkspaceManager
 from agents.lead_agent import LeadAgent
-from shared.schemas import ProjectStage, WorkflowState, BrandProfile, VideoSpec, Storyboard
+from shared.schemas import ProjectStage, WorkflowState, BrandProfile, VideoSpec, Storyboard, AssetType
 from shared.constants import FINAL_VIDEO_FILE
 from shared.exceptions import AgentError
 from providers.video import get_video_provider
@@ -85,12 +85,25 @@ class WorkflowRuntime:
     def resume(self, project_id: str, review_id: str) -> str:
         """Resume a paused pipeline. Engine-agnostic: the next stage is resolved
         from the YAML workflow graph (with a hardcoded fallback) so v1 and v2
-        projects share the same code path."""
+        projects share the same code path.
+
+        Human-in-the-loop feedback backflow: any comment text attached to the
+        resolved review is collected and injected into the next LLM-driven
+        stage (storyboard / scene_gen) so reviewers' edits actually reshape the
+        generated artifact instead of being silently archived.
+        """
         state = self._load_state(project_id)
         review = self.reviews.get_review(review_id)
-        if not review or review.status.value not in ('approved', 'rejected'):
+        if not review or review.status.value not in ('approved', 'rejected', 'partial_revision'):
             print(f'  [Resume] Review {review_id} not resolved')
             return ''
+
+        feedback = self._collect_feedback(review)
+
+        # Storyboard revision: regenerate the storyboard with the user's edit
+        # notes and re-pause for another review round (instead of advancing).
+        if review.status.value == 'partial_revision' and review.stage == ReviewStage.STORYBOARD and feedback:
+            return self._revise_storyboard(project_id, state, feedback)
 
         if review.status.value == 'rejected':
             print(f'  [Resume] Review rejected, aborting')
@@ -114,13 +127,61 @@ class WorkflowRuntime:
             flush_traces()
             return state.final_video_path or ''
 
-        # Non-pausing stages cascade internally (scene_gen->video_gen, stitch->publish)
-        handler(project_id, state, brief)
+        # Non-pausing stages cascade internally (scene_gen->video_gen, stitch->publish).
+        # Feedback is only meaningful for LLM-driven stages.
+        if next_stage in ('storyboard', 'scene_gen'):
+            handler(project_id, state, brief, feedback=feedback)
+        else:
+            handler(project_id, state, brief)
 
         flush_traces()
         if state.paused:
             return f"__PAUSED__:{state.meta.get('pause_review_id', '')}"
         return state.final_video_path or ''
+
+    @staticmethod
+    def _collect_feedback(review) -> str:
+        """Join non-empty review comment texts into a single feedback blob."""
+        parts = [
+            c.text.strip()
+            for c in (review.comments or [])
+            if getattr(c, 'text', '').strip()
+        ]
+        return '\n'.join(parts)
+
+    def _revise_storyboard(self, project_id: str, state: WorkflowState, feedback: str) -> str:
+        """Regenerate the storyboard incorporating reviewer feedback, then
+        re-create a storyboard review and pause again for another round."""
+        from shared.schemas import VideoSpec
+        spec = VideoSpec.model_validate(state.video_spec.model_dump() if state.video_spec else {})
+        brand = BrandProfile(brand_name=spec.brand)
+        storyboard = self.agent.generate_storyboard(spec, brand, feedback=feedback)
+        state.storyboard = storyboard
+        self.workspace.write_artifact(project_id, 'default', 'storyboard.json', storyboard.model_dump())
+
+        sb_text = self._gather_scene_text(storyboard.scenes)
+        sb_violations, sb_hard = self._collect_violations(self._run_guardrails(sb_text))
+        if sb_hard:
+            state.errors.append({'step': 'guardrail', 'message': 'Content safety violation in storyboard', 'details': sb_violations})
+            self._save_state(project_id, state)
+            get_event_bus().publish(Event(EVENT_PIPELINE_ERROR, {
+                'project_id': project_id, 'error': 'Content safety violation in storyboard'}))
+            return ''
+
+        from tools.storyboard_text import storyboard_to_txt
+        sb_payload = storyboard.model_dump()
+        sb_payload['readable_text'] = storyboard_to_txt(storyboard)
+        if sb_violations:
+            sb_payload['guardrail_violations'] = sb_violations
+        r2 = self.reviews.create_storyboard_review(project_id, sb_payload)
+        state.paused = True
+        state.meta['pause_review_id'] = r2.review_id
+        state.meta['pause_stage'] = 'storyboard'
+        self._save_state(project_id, state)
+        print(f'  [Pause] Storyboard revised, review: {r2.review_id}')
+        get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
+            'project_id': project_id, 'review_id': r2.review_id, 'stage': 'storyboard'}))
+        return f"__PAUSED__:{r2.review_id}"
 
     # ------------------------------------------------------------------
     # Stage handlers (each maps 1:1 to a YAML stage id)
@@ -136,7 +197,14 @@ class WorkflowRuntime:
         self.projects.advance_stage(project_id, ProjectStage.REQUIREMENT)
         with stage_span("requirement", {"project_id": project_id}):
             with lf.start_as_current_observation(name="llm.requirement", trace_context=_tctx, as_type="generation", end_on_exit=True):
-                spec = self.agent.understand_requirement(brief)
+                # Enrich the requirement analysis with real-world search context
+                # (product / competitor / audience info). Degrades to '' when no
+                # search provider is configured.
+                from tools.search import gather_requirement_context
+                search_context = gather_requirement_context(brief=brief)
+                if search_context:
+                    print(f'  [Requirement] search context gathered ({len(search_context)} chars)')
+                spec = self.agent.understand_requirement(brief, search_context=search_context)
         state.video_spec = spec
         self.workspace.write_artifact(project_id, run_id, 'video_spec.json', spec.model_dump())
         print(f'  [Requirement] Duration: {spec.duration_sec}s, Style: {spec.style}')
@@ -150,12 +218,12 @@ class WorkflowRuntime:
         get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
             'project_id': project_id, 'review_id': r1.review_id, 'stage': 'requirement'}))
 
-    def _exec_storyboard(self, project_id: str, state: WorkflowState, brief: str = '') -> None:
+    def _exec_storyboard(self, project_id: str, state: WorkflowState, brief: str = '', feedback: str = '') -> None:
         """Stage: storyboard generation + review (HITL #2)."""
         from shared.schemas import VideoSpec
         spec = VideoSpec.model_validate(state.video_spec.model_dump() if state.video_spec else {})
         brand = BrandProfile(brand_name=spec.brand)
-        storyboard = self.agent.generate_storyboard(spec, brand)
+        storyboard = self.agent.generate_storyboard(spec, brand, feedback=feedback)
         state.storyboard = storyboard
         self.workspace.write_artifact(project_id, 'default', 'storyboard.json', storyboard.model_dump())
 
@@ -168,7 +236,10 @@ class WorkflowRuntime:
                 'project_id': project_id, 'error': 'Content safety violation in storyboard'}))
             return
 
+        from tools.storyboard_text import storyboard_to_txt
         sb_payload = storyboard.model_dump()
+        # Human-readable artifact for the review UI / Feishu card.
+        sb_payload['readable_text'] = storyboard_to_txt(storyboard)
         if sb_violations:
             sb_payload['guardrail_violations'] = sb_violations
         r2 = self.reviews.create_storyboard_review(project_id, sb_payload)
@@ -370,11 +441,23 @@ class WorkflowRuntime:
 
             from tools.ffmpeg import render_final
             final_path = str(work_dir / FINAL_VIDEO_FILE)
+
+            # 需求三: 若用户上传了 BGM，混入最终视频
+            bgm_path: str | None = None
+            try:
+                from assets.service import AssetService
+                bgm_assets = AssetService().list_assets(asset_type=AssetType.BGM, project_id=project_id)
+                if bgm_assets:
+                    bgm_path = bgm_assets[0].file_path
+                    print(f'  [Stitch] Using user-uploaded BGM: {bgm_path}')
+            except Exception as exc:
+                print(f'  [Stitch] BGM lookup skipped (non-fatal): {exc}')
+
             render_final(
                 clip_paths=list(state.clips.values()),
                 voiceover_paths=voiceover_paths or None,
                 srt_path=srt_path,
-                bgm_path=None,
+                bgm_path=bgm_path,
                 output_path=final_path,
                 work_dir=str(work_dir / 'render'),
             )

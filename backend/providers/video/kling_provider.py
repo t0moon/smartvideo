@@ -51,7 +51,7 @@ class KlingVideoProvider(BaseVideoProvider):
 
         Returns the task_id (or external_task_id) used for polling.
         """
-        duration = kwargs.get('duration_sec', self.default_duration)
+        duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
         aspect_ratio = kwargs.get('aspect_ratio', self.default_aspect)
         resolution = kwargs.get('resolution', self.default_resolution)
         audio = kwargs.get('audio', self.default_audio)
@@ -90,6 +90,21 @@ class KlingVideoProvider(BaseVideoProvider):
 
         print(f'  [Kling] Task created: {task_id}')
         return str(task_id)
+
+    def _align_duration(self, duration) -> int:
+        """Kling 2.5 Turbo only accepts duration ∈ {5, 10} seconds.
+
+        Align any requested duration to the nearest supported bucket so callers
+        (e.g. scene shots of 3s/4s) don't trigger a 400 from the API.
+        """
+        try:
+            d = int(round(float(duration)))
+        except (TypeError, ValueError):
+            d = self.default_duration
+        aligned = 5 if d <= 5 else 10
+        if aligned != d:
+            print(f'  [Kling] duration {d}s aligned to {aligned}s (Kling 2.5 Turbo supports only 5/10s)')
+        return aligned
 
     def poll_status(self, task_id: str) -> str:
         """Poll the task status.
@@ -161,6 +176,9 @@ class KlingVideoProvider(BaseVideoProvider):
         resp = requests.request(
             method, url, headers=headers, timeout=timeout, **kwargs
         )
+        if not resp.ok:
+            # Surface the real API error body for root-cause diagnosis (e.g. 400 from Kling).
+            print(f'  [Kling][HTTP {resp.status_code}] {resp.text[:500]}')
         resp.raise_for_status()
 
         data = resp.json() if resp.text else {}
