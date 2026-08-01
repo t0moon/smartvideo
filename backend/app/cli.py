@@ -18,6 +18,10 @@ def main() -> None:
     run_p.add_argument("brief", nargs="?", default="", help="Brand/product brief text")
     run_p.add_argument("--name", "-n", default="Untitled", help="Project name")
     run_p.add_argument("--project", "-p", default="", help="Existing project ID (resume)")
+    run_p.add_argument("--engine", choices=["v1", "v2"], default="v2",
+                       help="Pipeline engine: v1 = hardcoded, v2 = YAML-driven (default)")
+    run_p.add_argument("--workflow", "-w", default="product_ad",
+                       help="Workflow template name (v2 only), e.g. product_ad")
 
     # project
     proj_p = sub.add_parser("project", help="Project management")
@@ -50,7 +54,10 @@ def main() -> None:
             print(f"Created project: {project.name} ({project.project_id})")
 
         runtime = WorkflowRuntime()
-        final_path = runtime.run_pipeline(project.project_id, brief)
+        if args.engine == "v2":
+            final_path = runtime.run_pipeline_v2(project.project_id, brief, args.workflow)
+        else:
+            final_path = runtime.run_pipeline(project.project_id, brief)
         if final_path:
             print(f"\nFinal video: {final_path}")
         else:

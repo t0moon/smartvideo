@@ -1,5 +1,11 @@
 # Product Ad Workflow v1
 # Workflow for creating brand product advertisement videos
+#
+# Stage graph (YAML-driven since Phase 2):
+#   requirement -> storyboard -> asset_prep -> scene_gen -> video_gen -> stitch -> publish
+# Each stage maps 1:1 to a WorkflowRuntime._exec_<stage> handler. Stages with
+# pause_for_review: true become a Human-in-the-Loop approval gate. Reordering or
+# adding stages here changes pipeline behaviour with zero code changes.
 
 name: product_ad_v1
 description: Brand product advertisement video production
@@ -21,12 +27,23 @@ stages:
     name: Storyboard Generation
     agent: lead
     skill: storyboard
-    next: scene_gen
+    next: asset_prep
     pause_for_review: true
     inputs:
       spec: 'workflow_state.video_spec'
     outputs:
       storyboard: 'workflow_state.storyboard'
+
+  - id: asset_prep
+    name: Asset Preparation
+    agent: lead
+    skill: asset_prep
+    next: scene_gen
+    pause_for_review: true
+    inputs:
+      storyboard: 'workflow_state.storyboard'
+    outputs:
+      assets: 'workflow_state.assets'
 
   - id: scene_gen
     name: Scene Generation
@@ -42,6 +59,7 @@ stages:
   - id: video_gen
     name: Video Clip Generation
     agent: video_provider
+    skill: video_prod
     next: stitch
     pause_for_review: true
     inputs:
@@ -52,12 +70,24 @@ stages:
   - id: stitch
     name: Video Stitching
     agent: ffmpeg
-    next: null
+    skill: stitch
+    next: publish
     pause_for_review: false
     inputs:
       clips: 'workflow_state.clips'
     outputs:
       final_video: 'workflow_state.final_video_path'
+
+  - id: publish
+    name: Publish Export
+    agent: publish
+    skill: publish
+    next: null
+    pause_for_review: false
+    inputs:
+      final_video: 'workflow_state.final_video_path'
+    outputs:
+      publish_result: 'workflow_state.publish_result'
 
 hooks:
   after_stage:
