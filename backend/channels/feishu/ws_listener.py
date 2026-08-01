@@ -12,13 +12,10 @@ import json
 import threading
 from typing import Any
 
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import P2ImMessageReceiveV1, P2ImMessageMessageReadV1
-from lark_oapi.event.callback.model.p2_card_action_trigger import (
-    P2CardActionTrigger,
-    P2CardActionTriggerResponse,
-    CallBackToast,
-)
+# NOTE: ``lark_oapi`` (heavy SDK) and ``runtime.workflow`` are imported lazily
+# inside the functions that actually need them. Importing them at module level
+# would pull the entire Feishu WS SDK + the workflow/runtime chain during
+# ``app.main`` import, deadlocking on a partially-initialised import loop.
 
 from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_REVIEWER_OPEN_ID
 from channels.feishu.async_executor import run_async as _run_async
@@ -26,7 +23,6 @@ from channels.feishu.client import FeishuClient
 from channels.feishu.messages import build_review_card
 from project.service import ProjectService
 from review.service import ReviewService
-from runtime.workflow import WorkflowRuntime
 from events.bus import (
     Event, get_event_bus,
     EVENT_PIPELINE_STARTED, EVENT_PIPELINE_COMPLETED,
@@ -75,6 +71,7 @@ def _coerce_card_value(raw: Any) -> dict:
 
 def _handle_card_action(header: dict, action: dict) -> dict:
     """Process a card action trigger (approve / reject / view)."""
+    from runtime.workflow import WorkflowRuntime
     # Normalize the action value (may arrive as dict or JSON string).
     raw_value = action.get("value")
     # Defensive: tolerate a double-wrapped payload (legacy shape).
@@ -121,6 +118,10 @@ def _handle_card_action(header: dict, action: dict) -> dict:
 
 def _on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
     """SDK callback for card.action.trigger — must return an ack response."""
+    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+        P2CardActionTriggerResponse,
+        CallBackToast,
+    )
     action_value = data.event.action.value if (data.event and data.event.action) else {}
     header = {"event_type": "card.action.trigger"}
     # Pass the action value at the top level so _handle_card_action can read
@@ -152,6 +153,7 @@ def _find_pending_review_for_sender(sender: str):
 
 def _handle_text_approval(sender: str, message_id: str, text: str, approve: bool) -> bool:
     """If the user is replying 'approve'/'reject' without a card, resolve the latest pending review."""
+    from runtime.workflow import WorkflowRuntime
     review = _find_pending_review_for_sender(sender)
     if review is None:
         return False
@@ -281,6 +283,7 @@ def _handle_im_message(event: dict) -> None:
 
 def _run_pipeline_and_notify(pid: str, text: str, message_id: str) -> None:
     """Run the workflow pipeline and notify the user on completion / error."""
+    from runtime.workflow import WorkflowRuntime
     try:
         runtime = WorkflowRuntime()
         result = runtime.run_pipeline(pid, text)
@@ -425,6 +428,7 @@ def register_chat_event_subscribers() -> None:
 # ── SDK client lifecycle ─────────────────────────────────────────────────
 
 def _build_event_handler():
+    import lark_oapi as lark
     return (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_im_message)
@@ -436,6 +440,7 @@ def _build_event_handler():
 
 def _run_ws_client() -> None:
     """Blocking entrypoint for the WS client (runs in a background thread)."""
+    import lark_oapi as lark
     global _ws_client
     _ws_client = lark.ws.Client(
         FEISHU_APP_ID, FEISHU_APP_SECRET,

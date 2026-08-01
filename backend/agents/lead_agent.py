@@ -63,12 +63,17 @@ class LeadAgent:
         return ''
 
     def _build_system(self, stage_name: str) -> str:
-        """Load base prompt + inject matching skill instructions."""
-        system = self._load_prompt(stage_name)
+        """Return the complete system prompt for *stage_name*.
+
+        Each SKILL.md is a self-contained system prompt (role + methodology +
+        rules + examples).  The loader matches *stage_name* to the right
+        SKILL.md body; base prompts in `agents/prompts/` serve as fallback
+        only when no skill matches the stage.
+        """
         skill_text = _get_skill_prompt(stage_name)
         if skill_text:
-            system = f"{system}\n\n## Domain Skill Instructions\n\n{skill_text}"
-        return system
+            return skill_text.strip()
+        return self._load_prompt(stage_name)
 
     def understand_requirement(self, brief: str) -> VideoSpec:
         system = self._build_system('requirement')
