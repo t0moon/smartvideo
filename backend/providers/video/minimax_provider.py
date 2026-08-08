@@ -19,7 +19,7 @@ from .base import BaseVideoProvider
 
 
 class MiniMaxVideoProvider(BaseVideoProvider):
-    """MiniMax video generation provider (video-01 / video-01-live2d)."""
+    """MiniMax video generation provider (MiniMax-H3, v2 API)."""
 
     name = 'minimax'
 
@@ -33,10 +33,10 @@ class MiniMaxVideoProvider(BaseVideoProvider):
         self.poll_interval = MINIMAX_POLL_INTERVAL
         self.poll_timeout = MINIMAX_POLL_TIMEOUT
 
-   def generate_clip(self, prompt: str, **kwargs) -> str:
-       duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
-       reference_image = kwargs.get('reference_image', '')
-       external_task_id = kwargs.get('external_task_id', '')
+    def generate_clip(self, prompt: str, **kwargs) -> str:
+        duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
+        reference_image = kwargs.get('reference_image', '')
+        external_task_id = kwargs.get('external_task_id', '')
 
         # ── Build H3 content array ──────────────────────────────────
         content: list[dict[str, Any]] = [
@@ -78,9 +78,10 @@ class MiniMaxVideoProvider(BaseVideoProvider):
             d = int(round(float(duration)))
         except (TypeError, ValueError):
             d = self.default_duration
-        d = max(2, min(d, 30))
+        # H3 supports duration 4-15s.
+        d = max(4, min(d, 15))
         if d != int(duration):
-            print(f'  [MiniMax] duration {duration}s clipped to {d}s (valid range: 2-30s)')
+            print(f'  [MiniMax] duration {duration}s clipped to {d}s (H3 valid range: 4-15s)')
         return d
 
     def _resolve_image(self, image_ref: str) -> str:
@@ -101,16 +102,18 @@ class MiniMaxVideoProvider(BaseVideoProvider):
         print(f'  [MiniMax] Reference not a reachable file/URL, skipping: {ri[:60]}...')
         return ''
 
-   def poll_status(self, task_id: str) -> str:
-        resp = self._request('GET', '/v2/query/video_generation', params={'task_id': task_id})
-        status = str(resp.get('status', '')).lower()
+    def poll_status(self, task_id: str) -> str:
+        # H3 query endpoint takes task_id as a PATH parameter.
+        resp = self._request('GET', f'/v2/query/video_generation/{task_id}')
+        # Response nests status under "task"; keep a flat fallback for safety.
+        status = str(resp.get('task', {}).get('status', '') or resp.get('status', '')).lower()
         completed = {'success', 'succeeded', 'completed', 'done'}
-        processing = {'preparing', 'queueing', 'processing', 'running'}
-        failed = {'fail', 'failed', 'error', 'unknown'}
+        processing = {'preparing', 'queueing', 'processing', 'running', 'queued'}
+        failed = {'fail', 'failed', 'error', 'unknown', 'cancelled'}
         if status in completed:
             return 'completed'
         if status in failed:
-            print(f'  [MiniMax] Task {task_id} failed: {resp.get("base_resp", {})}')
+            print(f'  [MiniMax] Task {task_id} failed: {resp.get("task", {}).get("status")}')
             return 'failed'
         return 'processing'
 
@@ -145,33 +148,36 @@ class MiniMaxVideoProvider(BaseVideoProvider):
         if not resp.ok:
             print(f'  [MiniMax][HTTP {resp.status_code}] {resp.text[:500]}')
         resp.raise_for_status()
-       data = resp.json() if resp.text else {}
+        data = resp.json() if resp.text else {}
         if isinstance(data, dict):
-            # MiniMax v2 API wraps all responses in a {"data": {...}, "base_resp": {...}} envelope.
-            # Unwrap the inner "data" so callers (poll_status, _get_video_url, etc.) can access
-            # task_id / status / video_url directly.
+            # MiniMax v2 API may wrap responses in a {"data": {...}, "base_resp": {...}} envelope.
+            # Unwrap the inner "data" so callers can access task_id / task / status directly.
             inner = data.get('data', data)
             return inner if isinstance(inner, dict) else data
         return {}
 
-   def _extract_task_id(self, data: dict[str, Any]) -> str:
-        base = data.get('base_resp', {})
-        if isinstance(base, dict) and base.get('status_code') != 0:
+    def _extract_task_id(self, data: dict[str, Any]) -> str:
+        # base_resp only appears on error responses; its absence is normal on success.
+        base = data.get('base_resp')
+        if isinstance(base, dict) and base.get('status_code', 0) != 0:
             msg = base.get('status_msg', 'unknown error')
             raise RuntimeError(f'MiniMax API error: {msg}')
-        task_id = data.get('task_id', '')
+        # Create response returns task_id flat; accept that directly.
+        task_id = data.get('task_id', '') or (data.get('task', {}) or {}).get('task_id', '')
         if not task_id:
             raise RuntimeError(f'MiniMax task creation failed (no task_id): {data}')
-        return task_id
+        return str(task_id)
 
-   def _get_video_url(self, task_id: str) -> str:
-        resp = self._request('GET', '/v2/query/video_generation', params={'task_id': task_id})
-        # H3 nests video_url under file.video_url; keep backward compat with flat video_url.
-        file = resp.get('file', {}) if isinstance(resp.get('file'), dict) else {}
-        video_url = file.get('video_url', '') or resp.get('video_url', '')
+    def _get_video_url(self, task_id: str) -> str:
+        # H3 query endpoint takes task_id as a PATH parameter. The result is
+        # nested under "task": the download URL lives at task.content.url.
+        resp = self._request('GET', f'/v2/query/video_generation/{task_id}')
+        task = resp.get('task', {}) if isinstance(resp.get('task'), dict) else {}
+        content = task.get('content', {}) if isinstance(task.get('content'), dict) else {}
+        video_url = content.get('url', '') or task.get('url', '') or resp.get('video_url', '')
         if video_url:
             return video_url
-        return file.get('cover_url', '') or resp.get('cover_url', '')
+        return resp.get('cover_url', '')
 
     def _download_file(self, url: str, output_path: str) -> None:
         resp = requests.get(url, timeout=300)
