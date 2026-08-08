@@ -15,6 +15,7 @@ from app.config import FEISHU_ENABLED, FEISHU_CALLBACK_MODE
 from channels.feishu import start_listener as start_feishu_ws
 from channels.feishu import stop_listener as stop_feishu_ws
 from channels.feishu.ws_listener import register_chat_event_subscribers
+from channels.feishu.conversation import get_conversation_router
 
 
 @asynccontextmanager
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mgr = get_channel_manager()
     mgr.ensure_channel()
     mgr.register_subscribers()
+    # Initialise card-less conversation router
+    get_conversation_router()
     # Start Feishu listener based on callback mode
     if FEISHU_ENABLED and FEISHU_CALLBACK_MODE == "ws":
         await start_feishu_ws()

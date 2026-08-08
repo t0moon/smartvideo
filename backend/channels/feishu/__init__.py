@@ -4,14 +4,14 @@ from typing import Any
 
 from channels.base import BaseChannel
 from channels.feishu.client import FeishuClient
-from channels.feishu.messages import build_review_card, build_status_card
+from channels.feishu.messages import build_status_card
 from channels.feishu.review_content import format_review_content, STAGE_NAMES
+from channels.feishu.conversation import get_conversation_router
 from review.service import ReviewService
 from channels.feishu.ws_listener import (
     start_listener,
     stop_listener,
     register_chat_event_subscribers,
-    send_review_card,
 )
 
 
@@ -64,7 +64,7 @@ class FeishuChannel(BaseChannel):
             print("  [Feishu] No reviewer_open_id configured, skipping review notification")
             return {"status": "skipped", "channel": "feishu", "reason": "no_open_id"}
 
-        # ── 每个 HITL 节点：先推送模型产出内容，再发审批按钮卡片 ──
+        # ── card-less: push model output + register with ConversationRouter ──
         stage_name = STAGE_NAMES.get(stage, stage)
         try:
             svc = ReviewService()
@@ -73,14 +73,17 @@ class FeishuChannel(BaseChannel):
                 content_text = format_review_content(stage, review.content)
                 if content_text:
                     header = f"\U0001f4cc {stage_name}\u7ed3\u679c\u5982\u4e0b\uff1a"
-                    await client.send_text_message(open_id, header + "\n" + content_text)
+                    prompt = f"{header}\n{content_text}\n\n\u8bf7\u56de\u590d\u300c\u6279\u51c6\u300d\u7ee7\u7eed\uff0c\u6216\u300c\u9a73\u56de + \u4fee\u6539\u610f\u89c1\u300d\u6765\u8c03\u6574\u540e\u91cd\u65b0\u751f\u6210\u3002"
+                    await client.send_text_message(open_id, prompt)
         except Exception as exc:
             print(f"  [Feishu] Failed to send review content for {review_id}: {exc}")
 
-        card = build_review_card(review_id, project_id, stage)
-        result = await client.send_card(open_id, card)
-        print(f"  [Feishu] Review card sent for {project_id} / {stage}")
-        return {"status": "sent", "channel": "feishu", "result": result}
+        # Register with ConversationRouter so the user's next text reply
+        # is routed to the correct review (no card callback needed).
+        router = get_conversation_router()
+        router.register(open_id, review_id, project_id, stage, stage_name)
+        print(f"  [Feishu] Review prompt sent for {project_id} / {stage}")
+        return {"status": "sent", "channel": "feishu", "result": {}}
 
     async def close(self) -> None:
         if self._client:

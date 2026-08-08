@@ -319,8 +319,8 @@ class WorkflowRuntime:
         get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
             'project_id': project_id, 'review_id': r_asset.review_id, 'stage': 'asset_prep'}))
 
-    def _exec_scene_gen(self, project_id: str, state: WorkflowState, brief: str = '') -> None:
-        """Stage: scene generation (no pause) — cascades to video generation."""
+   def _exec_scene_gen(self, project_id: str, state: WorkflowState, brief: str = '', feedback: str = '') -> None:
+        """Stage: scene generation (no pause) — cascades to video generation. Accepts optional feedback from review revisions."""
         run_id = 'default'
         lf = get_langfuse()
         lf_trace_id = state.meta.get('langfuse_trace_id', lf.create_trace_id())
@@ -341,7 +341,7 @@ class WorkflowRuntime:
         self.projects.advance_stage(project_id, ProjectStage.SCENE_GEN)
         with stage_span("scene_gen", {"project_id": project_id}):
             with lf.start_as_current_observation(name="llm.scene_gen", trace_context=_tctx, as_type="generation", end_on_exit=True):
-                scenes = self.agent.generate_scenes(storyboard, brand)
+                scenes = self.agent.generate_scenes(storyboard, brand, feedback=feedback)
         state.scenes = scenes
         self.workspace.write_artifact(project_id, run_id, 'scenes.json', [s.model_dump() for s in scenes])
         print(f'  [Scenes] {len(scenes)} scenes generated')
@@ -393,14 +393,30 @@ class WorkflowRuntime:
                     ref_img = fallback_ref
                 shot_ref = ref_img  # per-scene ref; shots inherit unless overridden
 
+                # Only pass reference_image when it is a real URL or file
+                def _is_valid_ref(ri):
+                    if not ri:
+                        return False
+                    if ri.startswith(('http://', 'https://')):
+                        return True
+                    if ri.startswith('data:'):
+                        return True
+                    if any(ri.lower().endswith(e) for e in ('.png','.jpg','.jpeg','.webp','.bmp','.gif')):
+                        return Path(ri).exists() if Path(ri).is_absolute() else False
+                    if len(ri) > 20 and any('\u4e00' <= c <= '\u9fff' for c in ri):
+                        return False
+                    return Path(ri).exists()
+
                 shots = scene.shots or []
                 if not shots:
                     clip_idx += 1
                     with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
                         prompt = scene.prompt or f'Scene {scene_i + 1}: {scene.description}'
                         kwargs: dict = {'duration_sec': scene.duration_sec}
-                        if ref_img:
+                        if ref_img and _is_valid_ref(ref_img):
                             kwargs['reference_image'] = ref_img
+                        elif ref_img:
+                            print(f'  [Video] Skipping non-file reference: {ref_img[:60]}...')
                         task_id = self.video_provider.generate_clip(prompt, **kwargs)
                         clip_name = f'clip_{clip_idx:03d}.mp4'
                         clip_path = str(clip_dir / clip_name)
@@ -421,8 +437,10 @@ class WorkflowRuntime:
                     with lf.start_as_current_observation(name=f"video.clip_{clip_idx}", trace_context=_tctx, as_type="tool", end_on_exit=True):
                         prompt = shot.prompt or shot.description or f'Scene {scene_i + 1} shot'
                         kwargs = {'duration_sec': duration}
-                        if shot_ref:
+                        if shot_ref and _is_valid_ref(shot_ref):
                             kwargs['reference_image'] = shot_ref
+                        elif shot_ref:
+                            print(f'  [Video] Skipping non-file reference: {shot_ref[:60]}...')
                         task_id = self.video_provider.generate_clip(prompt, **kwargs)
                         clip_name = f'clip_{clip_idx:03d}.mp4'
                         clip_path = str(clip_dir / clip_name)

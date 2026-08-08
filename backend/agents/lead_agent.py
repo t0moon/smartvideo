@@ -75,18 +75,30 @@ class LeadAgent:
             return skill_text.strip()
         return self._load_prompt(stage_name)
 
-    def understand_requirement(self, brief: str, search_context: str = '') -> VideoSpec:
+    def understand_requirement(self, brief: str, search_context: str = '',
+                               previous_spec: VideoSpec | None = None) -> VideoSpec:
         system = self._build_system('requirement')
         if not system:
             system = 'Extract video specification from the user brief. Return a JSON object.'
+        messages: list[dict] = [{'role': 'system', 'content': system}]
         user_content = brief
-        # Inject any web-search context gathered for the requirement stage.
         if search_context:
             user_content += '\n\n' + search_context
-        messages = [
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user_content},
-        ]
+        messages.append({'role': 'user', 'content': user_content})
+
+        # Multi-turn: if the user rejected with feedback, show the LLM its
+        # previous output so it can do a targeted revision.
+        if previous_spec is not None:
+            try:
+                prev_json = previous_spec.model_dump_json(indent=2)
+            except Exception:
+                prev_json = str(previous_spec)
+            messages.append({'role': 'assistant', 'content': prev_json})
+            # The feedback text is already part of search_context as the
+            # second user message; no extra user message needed here.
+            # (callers: workflow._exec_requirement passes feedback through
+            #  the search_context chain for now; we keep the signature ready.)
+
         start = time.perf_counter()
         try:
             result = self.router.chat_structured(messages, VideoSpec)
@@ -102,23 +114,31 @@ class LeadAgent:
             get_metrics().increment('llm.error', {'method': 'understand_requirement'})
             return VideoSpec(raw_brief=brief)
 
-    def generate_storyboard(self, spec: VideoSpec, brand: BrandProfile | None = None, feedback: str = '') -> Storyboard:
+    def generate_storyboard(self, spec: VideoSpec, brand: BrandProfile | None = None,
+                            feedback: str = '', previous_storyboard: Storyboard | None = None) -> Storyboard:
         system = self._build_system('storyboard')
         if not system:
             system = 'Generate a storyboard from the video specification.'
         context = f'Video Spec:\n{spec.model_dump_json(indent=2)}\n'
         if brand:
             context += f'\nBrand Profile:\n{brand.model_dump_json(indent=2)}'
-        # Human-in-the-loop feedback from a previous review round.
-        if feedback:
-            context += (
-                '\n\n## 上一轮审核的用户修改意见（请据此修订，保留用户认可的部分，'
-                '仅修改被指出的问题）\n' + feedback
-            )
-        messages = [
+        messages: list[dict] = [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': context},
         ]
+        # Multi-turn: show previous output so LLM can target edits.
+        if previous_storyboard is not None:
+            try:
+                prev_json = previous_storyboard.model_dump_json(indent=2)
+            except Exception:
+                prev_json = str(previous_storyboard)
+            messages.append({'role': 'assistant', 'content': prev_json})
+        # User feedback as a follow-up message (revision round).
+        if feedback:
+            messages.append({
+                'role': 'user',
+                'content': f'## 用户修改意见（请据此修订，保留用户认可的部分，仅修改被指出的问题）\n{feedback}',
+            })
         start = time.perf_counter()
         try:
             result = self.router.chat_structured(messages, Storyboard)
@@ -129,21 +149,30 @@ class LeadAgent:
             get_metrics().increment('llm.error', {'method': 'generate_storyboard'})
             return Storyboard()
 
-    def generate_scenes(self, storyboard: Storyboard, brand: BrandProfile | None = None, feedback: str = '') -> list[Scene]:
+    def generate_scenes(self, storyboard: Storyboard, brand: BrandProfile | None = None,
+                         feedback: str = '', previous_scenes: list[Scene] | None = None) -> list[Scene]:
         system = self._build_system('scene')
         if not system:
             system = 'Generate detailed scene descriptions from the storyboard.'
         context = f'Storyboard:\n{storyboard.model_dump_json(indent=2)}\n'
         if brand:
             context += f'\nBrand:\n{brand.model_dump_json(indent=2)}'
-        if feedback:
-            context += (
-                '\n\n## 用户修改意见（请据此调整场景/镜头设计）\n' + feedback
-            )
-        messages = [
+        messages: list[dict] = [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': context},
         ]
+        if previous_scenes:
+            try:
+                import json
+                prev_json = json.dumps([s.model_dump() for s in previous_scenes], indent=2, ensure_ascii=False)
+            except Exception:
+                prev_json = str(previous_scenes)
+            messages.append({'role': 'assistant', 'content': prev_json})
+        if feedback:
+            messages.append({
+                'role': 'user',
+                'content': f'## 用户修改意见（请据此调整场景/镜头设计）\n{feedback}',
+            })
         start = time.perf_counter()
         try:
             result = self.router.chat_structured(messages, SceneList)

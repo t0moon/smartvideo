@@ -21,8 +21,8 @@ from typing import Any
 from app.config import FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_REVIEWER_OPEN_ID
 from channels.feishu.async_executor import run_async as _run_async
 from channels.feishu.client import FeishuClient
-from channels.feishu.messages import build_review_card
 from channels.feishu.review_content import format_review_content, STAGE_NAMES
+from channels.feishu.conversation import get_conversation_router
 from project.service import ProjectService
 from review.service import ReviewService
 from events.bus import (
@@ -86,92 +86,6 @@ def _get_chat_client() -> FeishuClient:
 async def _create_client() -> FeishuClient:
     return FeishuClient()
 
-
-# ── card action handling ──────────────────────────────────────────────────
-
-def _coerce_card_value(raw: Any) -> dict:
-    """Feishu may deliver ``action.value`` as a JSON *string* or a *dict*
-    depending on the card schema version; normalize both to a dict."""
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def _handle_card_action(header: dict, action: dict) -> dict:
-    """Process a card action trigger (approve / reject / view)."""
-    from runtime.workflow import WorkflowRuntime
-    # Normalize the action value (may arrive as dict or JSON string).
-    raw_value = action.get("value")
-    # Defensive: tolerate a double-wrapped payload (legacy shape).
-    if raw_value is None and isinstance(action.get("action"), dict):
-        raw_value = action["action"].get("value")
-    value = _coerce_card_value(raw_value)
-    action_name = value.get("action", "")
-    review_id = value.get("review_id", "")
-    project_id = value.get("project_id", "")
-
-    if action_name in ("approve", "reject") and review_id:
-        review = _svc.get_review(review_id)
-        if review is None:
-            return {"status": "error", "message": "Review not found"}
-
-        pid = review.project_id
-        if action_name == "approve":
-            _svc.approve(review_id, reviewer="feishu")
-            print(f"  [Feishu-WS] Approved review {review_id} for project {pid}")
-        else:
-            _svc.reject(review_id, reviewer="feishu")
-            print(f"  [Feishu-WS] Rejected review {review_id} for project {pid}")
-
-        # Resume pipeline in a background thread — the card callback must
-        # ack within 3s, while resume may run video generation for minutes.
-        def _resume_bg() -> None:
-            try:
-                WorkflowRuntime().resume(pid, review_id)
-            except Exception as exc:
-                print(f"  [Feishu-WS] Resume error for {pid}: {exc}")
-                try:
-                    WorkflowRuntime().record_resume_error(pid, exc)
-                except Exception:
-                    pass
-
-        threading.Thread(target=_resume_bg, daemon=True).start()
-        return {"status": "ok", "action": action_name, "project_id": pid}
-
-    if action_name == "view":
-        return {"status": "ok", "action": "view"}
-
-    return {"status": "received", "action": action_name}
-
-
-def _on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
-    """SDK callback for card.action.trigger — must return an ack response."""
-    from lark_oapi.event.callback.model.p2_card_action_trigger import (
-        P2CardActionTriggerResponse,
-        CallBackToast,
-    )
-    action_value = data.event.action.value if (data.event and data.event.action) else {}
-    header = {"event_type": "card.action.trigger"}
-    # Pass the action value at the top level so _handle_card_action can read
-    # action.get("value") correctly (matches the dict shape it expects).
-    action = {"value": action_value}
-    # Diagnostic log — confirms whether Feishu is actually pushing the
-    # card.action.trigger event to this backend (后台是否已订阅该事件).
-    print(f"  [Feishu-WS] >>> card.action.trigger received: {action_value}")
-    _handle_card_action(header, action)
-    resp = P2CardActionTriggerResponse()
-    resp.toast = CallBackToast()
-    resp.toast.type = "info"
-    resp.toast.content = "已处理"
-    return resp
 
 
 # ── IM message (chat) handling ────────────────────────────────────────────
@@ -278,18 +192,33 @@ def _handle_im_message(event: dict) -> None:
             print(f"  [Feishu-Chat] Failed to reply (check im:message permission): {e}")
         return
 
-    # ── Text-based approval / rejection fallback ─────────────────────────
-    approve_words = {"批准", "同意", "通过", "approve", "ok", "好的", "yes", "y"}
-    reject_words = {"驳回", "拒绝", "不通过", "reject", "no", "否", "重新做"}
-    lower = text.strip().lower()
-    if lower in approve_words or lower in reject_words:
-        if _handle_text_approval(sender, message_id, text, approve=(lower in approve_words)):
+    # ── Text-based approval / revision (card-less conversation routing) ──
+    router = get_conversation_router()
+    result = router.route(sender, message_id, text)
+   if result == "new_project":
+        # Guard: text looks like a review command but no review is pending.
+        # Do NOT create a project from approval/rejection keywords.
+        from channels.feishu.intent import parse_intent
+        intent, _ = parse_intent(text)
+        if intent in ("approve", "reject", "reject_feedback"):
+            try:
+                _run_async(client.reply_to_message(
+                    message_id,
+                    "當前沒有待處理的審批。如需創建新視頻項目，請直接發送視頻需求描述。"
+                ))
+            except Exception as exc:
+                print(f"  [Feishu-Chat] Guard reply failed: {exc}")
             return
-        try:
-            _run_async(client.reply_to_message(message_id, "当前没有待审批的项目，无法处理该指令。"))
-        except Exception as exc:
-            print(f"  [Feishu-Chat] No-pending-review reply failed: {exc}")
+        pass  # fall through to project creation below
+    elif result == "handled":
+        # User just approved/rejected a pending review — do NOT create project.
         return
+    elif result in ("clarify", "remind"):
+        # Router already re-prompts; suppress duplicate ack.
+        return
+    else:
+        # Unknown result — safety net: create project as fallback.
+        pass
 
     # ── Idempotency gate 2: duplicate brief within the dedup window ──────
     if _is_duplicate_brief(sender, text):
@@ -389,51 +318,54 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
     _handle_im_message(event)
 
 
-# ── review card sending ──────────────────────────────────────────────────
+# ── review prompt (text-only, card-less) ──────────────────────────────────
 
-def send_review_card(project_id: str, stage: str, review_id: str,
-                     project_name: str = "", review_content: str = "") -> None:
-    """Send the interactive approval card to the chat initiator (if any).
+def send_review_prompt(project_id: str, stage: str, review_id: str) -> None:
+    """Push model output as text, then register with ConversationRouter so
+    the user's next text reply is routed to the right review.
 
-    Before the action card, pushes the model's output content as a text
-    message so the user can read what was generated and make an informed
-    decision (approve / reject).
+    This replaces the old ``send_review_card`` which sent an interactive
+    card with approve/reject buttons. Now the user simply replies in
+    natural language: "批准" / "驳回 改成15秒暖色调".
     """
     if project_id not in _user_chat_map:
-        print(f"  [Feishu-Card] No chat mapping for {project_id}, skip card")
+        print(f"  [Feishu-Prompt] No chat mapping for {project_id}, skip")
         return
-    sender, _ = _user_chat_map[project_id]
+    sender, last_message_id = _user_chat_map[project_id]
 
-    # ── 推送模型产出内容（在审批卡片之前） ──
     stage_name = STAGE_NAMES.get(stage, stage)
+    content_text = ""
     try:
         review = _svc.get_review(review_id)
         if review and review.content:
             content_text = format_review_content(stage, review.content)
-            if content_text:
-                header = f"\U0001f4cc {stage_name}\u7ed3\u679c\u5982\u4e0b\uff1a"
-                _run_async(_get_chat_client().send_text_message(sender, header + "\n" + content_text))
     except Exception as exc:
-        print(f"  [Feishu-Card] Failed to send review content for {review_id}: {exc}")
+        print(f"  [Feishu-Prompt] Failed to format content for {review_id}: {exc}")
 
-    card = build_review_card(review_id, project_id, stage, project_name, review_content)
+    # Send model output as text
     try:
-        _run_async(_get_chat_client().send_card(sender, card))
-        print(f"  [Feishu-Card] Sent review card for {project_id} ({stage}) to {sender}")
-    except Exception as e:
-        print(f"  [Feishu-Card] Failed to send card: {e}")
+        header = f"\U0001f4cc {stage_name}结果如下："
+        body = content_text or f"模型已完成{stage_name}，请确认后继续。"
+        prompt = f"{header}\n{body}\n\n请回复「批准」继续，或「驳回 + 修改意见」来调整后重新生成。"
+        _run_async(_get_chat_client().send_text_message(sender, prompt))
+    except Exception as exc:
+        print(f"  [Feishu-Prompt] Failed to send review text for {review_id}: {exc}")
+
+    # Register with ConversationRouter so future text replies are routed
+    router = get_conversation_router()
+    router.register(sender, review_id, project_id, stage, stage_name)
+    print(f"  [Feishu-Prompt] Queued review {review_id} ({stage}) for {sender[:12]}")
 
 
 # ── pipeline status subscribers ──────────────────────────────────────────
 
 def _on_pipeline_paused(event: Event) -> None:
-    """Forward pipeline pause events as a Feishu approval card.
+    """Forward pipeline pause events as a Feishu text prompt.
 
-    The interactive card is delivered by ChannelManager via
-    ``FeishuChannel.notify_review`` to FEISHU_REVIEWER_OPEN_ID. When the chat
-    initiator is *not* that reviewer (or no reviewer is configured), we also
-    push the actionable card directly into the conversation so the person who
-    started the project can approve it right there.
+    The content text is delivered by FeishuChannel.notify_review (ChannelManager)
+    to FEISHU_REVIEWER_OPEN_ID. When the chat initiator is *not* that reviewer
+    (or no reviewer is configured), we also push the prompt directly into their
+    chat so they can approve/reject right there — via natural language, not a card.
     """
     pid = event.data.get("project_id", "")
     if pid not in _user_chat_map:
@@ -442,29 +374,18 @@ def _on_pipeline_paused(event: Event) -> None:
     stage = event.data.get("stage", "?")
     review_id = event.data.get("review_id", "")
 
-    stage_names = {
-        "requirement": "需求理解",
-        "storyboard": "分镜脚本",
-        "asset_prep":  "资产确认",
-        "video_review": "视频审核",
-        "video_gen": "视频生成",
-    }
-    stage_cn = stage_names.get(stage, stage)
+    stage_cn = STAGE_NAMES.get(stage, stage)
 
-    # Same person / no card → ChannelManager.notify_review already sent the card
-    # to the reviewer; a plain text hint is enough (avoid a duplicate card).
     if not review_id or sender == FEISHU_REVIEWER_OPEN_ID:
-        try:
-            _run_async(_get_chat_client().send_text_message(
-                sender,
-                f"⏸️ {stage_cn}阶段已完成，待审批中..."
-            ))
-        except Exception as exc:
-            print(f"  [Feishu-Chat] Status update error: {exc}")
+        # ChannelManager.notify_review already pushed content + registered
+        # with ConversationRouter. Do NOT register again — a duplicate
+        # registration would queue the same review and re-send its content
+        # when the first is resolved (approve/reject).
+        print(f"  [Feishu-Chat] Reviewer {sender[:12]} — letting ChannelManager handle review {review_id[:12]}")
         return
 
-    # Different chat initiator → deliver the actionable card into their chat.
-    send_review_card(pid, stage, review_id, project_name=pid)
+    # Different chat initiator → push the review prompt into their chat.
+    send_review_prompt(pid, stage, review_id)
 
 
 def _on_pipeline_completed(event: Event) -> None:
@@ -512,7 +433,6 @@ def _build_event_handler():
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_im_message)
         .register_p2_im_message_message_read_v1(_on_im_message_read)
-        .register_p2_card_action_trigger(_on_card_action)
         .build()
     )
 
