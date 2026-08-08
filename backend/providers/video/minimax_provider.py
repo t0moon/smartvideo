@@ -33,36 +33,42 @@ class MiniMaxVideoProvider(BaseVideoProvider):
         self.poll_interval = MINIMAX_POLL_INTERVAL
         self.poll_timeout = MINIMAX_POLL_TIMEOUT
 
-    def generate_clip(self, prompt: str, **kwargs) -> str:
-        duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
-        reference_image = kwargs.get('reference_image', '')
-        external_task_id = kwargs.get('external_task_id', '')
+   def generate_clip(self, prompt: str, **kwargs) -> str:
+       duration = self._align_duration(kwargs.get('duration_sec', self.default_duration))
+       reference_image = kwargs.get('reference_image', '')
+       external_task_id = kwargs.get('external_task_id', '')
 
-        payload: dict[str, Any] = {
-            'model': self.model,
-            'prompt': prompt.strip(),
-            'prompt_optimizer': True,
-            'duration': int(duration),
-            'aspect_ratio': self.default_aspect,
-            'resolution': self.default_resolution,
-        }
+        # ── Build H3 content array ──────────────────────────────────
+        content: list[dict[str, Any]] = [
+            {'type': 'text', 'text': prompt.strip()},
+        ]
 
         if reference_image:
             image_url = self._resolve_image(reference_image)
             if image_url:
-                payload['first_frame_image'] = image_url
-                if self.model == 'video-01':
-                    payload['model'] = 'video-01-live2d'
+                content.append({
+                    'type': 'image_url',
+                    'image_url': {'url': image_url},
+                    'role': 'first_frame',
+                })
                 print(f'  [MiniMax] Image-to-video task (ref: {reference_image[:60]}...)')
             else:
                 print(f'  [MiniMax] Reference image not usable, falling back to text-to-video')
         else:
             print(f'  [MiniMax] Text-to-video task (prompt: {prompt[:60]}...)')
 
+        payload: dict[str, Any] = {
+            'model': self.model,
+            'content': content,
+            'duration': int(duration),
+            'ratio': self.default_aspect,
+            'resolution': self.default_resolution,
+        }
+
         if external_task_id:
             payload['external_task_id'] = external_task_id
 
-        resp = self._request('POST', '/v1/video_generation', json=payload)
+        resp = self._request('POST', '/v2/video_generation', json=payload)
         task_id = self._extract_task_id(resp)
         print(f'  [MiniMax] Task created: {task_id}')
         return str(task_id)
@@ -95,8 +101,8 @@ class MiniMaxVideoProvider(BaseVideoProvider):
         print(f'  [MiniMax] Reference not a reachable file/URL, skipping: {ri[:60]}...')
         return ''
 
-    def poll_status(self, task_id: str) -> str:
-        resp = self._request('GET', '/v1/query/video_generation', params={'task_id': task_id})
+   def poll_status(self, task_id: str) -> str:
+        resp = self._request('GET', '/v2/query/video_generation', params={'task_id': task_id})
         status = str(resp.get('status', '')).lower()
         completed = {'success', 'succeeded', 'completed', 'done'}
         processing = {'preparing', 'queueing', 'processing', 'running'}
@@ -158,12 +164,14 @@ class MiniMaxVideoProvider(BaseVideoProvider):
             raise RuntimeError(f'MiniMax task creation failed (no task_id): {data}')
         return task_id
 
-    def _get_video_url(self, task_id: str) -> str:
-        resp = self._request('GET', '/v1/query/video_generation', params={'task_id': task_id})
-        video_url = resp.get('video_url', '')
+   def _get_video_url(self, task_id: str) -> str:
+        resp = self._request('GET', '/v2/query/video_generation', params={'task_id': task_id})
+        # H3 nests video_url under file.video_url; keep backward compat with flat video_url.
+        file = resp.get('file', {}) if isinstance(resp.get('file'), dict) else {}
+        video_url = file.get('video_url', '') or resp.get('video_url', '')
         if video_url:
             return video_url
-        return resp.get('cover_url', '')
+        return file.get('cover_url', '') or resp.get('cover_url', '')
 
     def _download_file(self, url: str, output_path: str) -> None:
         resp = requests.get(url, timeout=300)
