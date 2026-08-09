@@ -503,7 +503,7 @@ smartvideo project get <project_id>
 
 ## 开发路线
 
-项目按 6 个阶段分步推进,当前处于 **Phase 1(核心引擎 MVP)**:
+项目按 6 个阶段分步推进:
 
 - **Phase 1** —— 核心引擎:从 brief 到成片闭环,CLI 可运行
 - **Phase 2** —— Web 平台:浏览器中创建项目、填写需求、查看进度
