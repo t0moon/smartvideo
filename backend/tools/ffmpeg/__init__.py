@@ -105,11 +105,13 @@ def get_video_duration(path: str) -> float:
         return 0.0
 
 
-def concat_videos(video_paths: list[str], output_path: str) -> str:
+def concat_videos(video_paths: list[str], output_path: str, keep_audio: bool = False) -> str:
     """Concatenate multiple video clips into one.
 
     Re-encodes to H.264 to guarantee compatibility regardless of
-    source codec differences between clips.
+    source codec differences between clips. When ``keep_audio`` is True the
+    clips' original audio tracks are preserved (re-encoded to AAC stereo) so
+    the merged video keeps on-screen sound / score for later mixing.
     """
     output_path = str(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -128,19 +130,32 @@ def concat_videos(video_paths: list[str], output_path: str) -> str:
     for i in range(len(video_paths)):
         inputs.extend(['-i', video_paths[i]])
         filter_parts.append(f'[{i}:v]scale=1280:720,setsar=1[v{i}]')
+        if keep_audio:
+            filter_parts.append(
+                f'[{i}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a{i}]'
+            )
 
     concat_inputs = ''.join(f'[v{i}]' for i in range(len(video_paths)))
     filter_complex = ';'.join(filter_parts) + f';{concat_inputs}concat=n={len(video_paths)}:v=1:a=0[outv]'
+
+    audio_map: list[str] = []
+    if keep_audio:
+        audio_inputs = ''.join(f'[a{i}]' for i in range(len(video_paths)))
+        filter_complex += f';{audio_inputs}concat=n={len(video_paths)}:v=0:a=1[outa]'
+        audio_map = ['-map', '[outa]']
 
     cmd = [
         'ffmpeg', '-y',
         *inputs,
         '-filter_complex', filter_complex,
         '-map', '[outv]',
+        *audio_map,
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-crf', '23',
         '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '192k',
         output_path,
     ]
     ok, err = _run_ffmpeg(cmd)
@@ -263,6 +278,47 @@ def mix_audio_tracks(
     return output_path
 
 
+def mix_original_and_voiceover(
+    video_path: str,
+    voiceover_path: str,
+    output_path: str,
+    original_volume: float = 0.35,
+) -> str:
+    """Mix the video's original audio with the TTS voiceover.
+
+    The original on-screen sound / score is kept as a background bed at a
+    reduced volume, while the TTS voiceover plays at full volume on top —
+    producing a "narrated with score" effect instead of replacing the
+    original audio entirely (which is what ``add_audio_track`` does).
+    """
+    output_path = str(output_path)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        'ffmpeg', '-y',
+        '-i', video_path,
+        '-i', voiceover_path,
+        '-filter_complex',
+        (
+            f'[0:a]aresample=44100,volume={original_volume}[orig];'
+            f'[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0[vce];'
+            f'[orig][vce]amix=inputs=2:duration=longest:dropout_transition=0[aout]'
+        ),
+        '-map', '0:v',
+        '-map', '[aout]',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        output_path,
+    ]
+    ok, err = _run_ffmpeg(cmd)
+    if not ok:
+        print(f'  [FFmpeg] mix_with_original failed, falling back to voiceover-only: {err[:200]}')
+        return add_audio_track(video_path, voiceover_path, output_path)
+    print(f'  [FFmpeg] Mixed original audio + voiceover -> {output_path}')
+    return output_path
+
+
 def burn_subtitles(video_path: str, srt_path: str, output_path: str) -> str:
     """Burn SRT subtitles into the video (hardcoded, visible on all players)."""
     output_path = str(output_path)
@@ -356,6 +412,7 @@ def render_final(
     bgm_path: str | None = None,
     output_path: str = '',
     work_dir: str = '',
+    mix_original_audio: bool = False,
 ) -> str:
     """Full render pipeline: concat clips -> add voiceover -> mix BGM -> burn subtitles.
 
@@ -376,13 +433,13 @@ def render_final(
     if not clip_paths:
         raise ValueError('No video clips provided for rendering')
 
-    # Step 1: Concatenate video clips
+    # Step 1: Concatenate video clips (keep original audio when mixing)
     merged_video = str(work_dir / '_merged.mp4')
-    concat_videos(clip_paths, merged_video)
+    concat_videos(clip_paths, merged_video, keep_audio=mix_original_audio)
 
     current = merged_video
 
-    # Step 2: Add voiceover audio
+    # Step 2: Add / mix voiceover audio
     if voiceover_paths:
         full_voiceover = str(work_dir / '_voiceover.aac')
         concat_audio(voiceover_paths, full_voiceover)
@@ -390,6 +447,8 @@ def render_final(
         with_voice = str(work_dir / '_with_voice.mp4')
         if bgm_path and Path(bgm_path).exists():
             mix_audio_tracks(current, full_voiceover, bgm_path, with_voice)
+        elif mix_original_audio:
+            mix_original_and_voiceover(current, full_voiceover, with_voice)
         else:
             add_audio_track(current, full_voiceover, with_voice)
         current = with_voice

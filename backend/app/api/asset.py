@@ -115,3 +115,20 @@ async def upload_asset(
     )
     return asset
 
+
+@router.post('/transcribe', status_code=200)
+async def transcribe_asset(asset_id: str = Form(...)) -> dict:
+    """需求增强: 对任意已上传的 voice 资产做语音转写（SiliconFlow ASR）。
+
+    返回 {"asset_id": ..., "transcript": "..."}。未配置 ASR key 或转写失败
+    时 transcript 为空字符串而非报错，保证接口稳定可用。
+    """
+    a = svc.get_asset(asset_id)
+    if not a:
+        raise HTTPException(404, 'Asset not found')
+    if a.asset_type != AssetType.VOICE:
+        raise HTTPException(400, 'Only voice assets can be transcribed')
+    from tools.transcription import transcribe_audio
+    transcript = transcribe_audio(a.file_path)
+    return {'asset_id': asset_id, 'transcript': transcript}
+

@@ -195,7 +195,7 @@ def _handle_im_message(event: dict) -> None:
     # ── Text-based approval / revision (card-less conversation routing) ──
     router = get_conversation_router()
     result = router.route(sender, message_id, text)
-   if result == "new_project":
+    if result == "new_project":
         # Guard: text looks like a review command but no review is pending.
         # Do NOT create a project from approval/rejection keywords.
         from channels.feishu.intent import parse_intent

@@ -6,8 +6,8 @@ two key patterns that a card-less, conversation-driven HITL loop requires:
 1. Pure approve:  "批准" / "通过" / "ok"
 2. Reject only:   "驳回" / "拒绝" / "不对"
 3. **Reject with feedback**: "驳回 改成暖色调" / "拒绝 第三个场景不对"
-   → parser extracts the feedback portion so the pipeline can do a
-   partial_revision with the user's edit notes.
+    → parser extracts the feedback portion so the pipeline can do a
+    partial_revision with the user's edit notes.
 
 A separate "clarify" intent handles "什么意思" / "再说一遍" — the bot
 re-sends the review content.

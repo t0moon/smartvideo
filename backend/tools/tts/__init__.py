@@ -46,7 +46,9 @@ def generate_tts(
     Falls back to a silent audio file (via ffmpeg) when no API key is configured,
     so the pipeline can still produce a complete video in placeholder mode.
     """
-    from app.config import AUDIO_TTS_VOICE, AUDIO_TTS_SPEED, AUDIO_TTS_MODEL
+    from app.config import (
+        AUDIO_TTS_VOICE, AUDIO_TTS_SPEED, AUDIO_TTS_MODEL, AUDIO_TTS_PROVIDER,
+    )
 
     voice = voice or AUDIO_TTS_VOICE
     speed = speed or AUDIO_TTS_SPEED
@@ -56,12 +58,13 @@ def generate_tts(
     client = _get_tts_client()
     if client and text.strip():
         try:
-            response = client.audio.speech.create(
-                model=AUDIO_TTS_MODEL,
-                voice=voice,
-                input=text,
-                speed=speed,
-            )
+            # SiliconFlow TTS (CosyVoice2) does NOT accept OpenAI's `speed`
+            # field and identifies voices as `model:voice`, so only forward
+            # `speed` to the native OpenAI provider.
+            kwargs = {'model': AUDIO_TTS_MODEL, 'voice': voice, 'input': text}
+            if (AUDIO_TTS_PROVIDER or 'openai').lower() != 'siliconflow':
+                kwargs['speed'] = speed
+            response = client.audio.speech.create(**kwargs)
             response.stream_to_file(output_path)
             print(f'  [TTS] Generated: {output_path} ({len(text)} chars)')
             return output_path

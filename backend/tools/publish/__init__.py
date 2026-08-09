@@ -105,8 +105,24 @@ def get_publisher(name: str = 'local') -> BasePublisher:
 
 
 def publish_local(video_path: str, title: str = 'SmartVideo Output') -> dict[str, Any]:
-    """Synchronous convenience wrapper for local export."""
+    """Synchronous convenience wrapper for local export.
+
+    Safe to call both from plain synchronous code and from inside an
+    already-running asyncio event loop (e.g. a FastAPI endpoint that
+    triggers the pipeline synchronously). In the latter case we run the
+    async publish in a dedicated loop on a worker thread to avoid the
+    "This event loop is already running" RuntimeError.
+    """
     pub = get_publisher('local')
-    return asyncio.get_event_loop().run_until_complete(
-        pub.publish(video_path, title)
-    )
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(
+                lambda: asyncio.run(pub.publish(video_path, title))
+            ).result()
+    return asyncio.run(pub.publish(video_path, title))

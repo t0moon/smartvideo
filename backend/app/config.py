@@ -68,6 +68,8 @@ AUDIO_TTS_VOICE = (os.getenv('AUDIO_TTS_VOICE') or 'alloy').strip()
 AUDIO_TTS_SPEED = float(os.getenv('AUDIO_TTS_SPEED') or '1.0')
 AUDIO_TTS_BASE_URL = os.getenv('AUDIO_TTS_BASE_URL', '')
 AUDIO_TTS_API_KEY = os.getenv('AUDIO_TTS_API_KEY', '')
+# ASR (speech-to-text) shares the SiliconFlow account/key with TTS.
+AUDIO_ASR_MODEL = (os.getenv('AUDIO_ASR_MODEL') or 'FunAudioLLM/SenseVoiceSmall').strip()
 
 # ── Feishu ────────────────────────────────────────────────────
 FEISHU_APP_ID = os.getenv('FEISHU_APP_ID', '')

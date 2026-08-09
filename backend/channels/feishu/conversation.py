@@ -33,10 +33,10 @@ class ConversationRouter:
     ---------
     1. ``register()`` — called when a pipeline pauses at a HITL node.
     2. ``route()`` — called on every incoming text message from a user whose
-       state is "reviewing".
+        state is "reviewing".
     3. ``release()`` — called when the review is resolved (approved/rejected).
     4. ``check_timeouts()`` — periodic; any review past timeout_at gets a
-       re-prompt or is expired.
+        re-prompt or is expired.
     """
 
     # 30 min before first re-prompt, 60 min before giving up.

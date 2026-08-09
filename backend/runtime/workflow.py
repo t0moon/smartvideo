@@ -282,6 +282,17 @@ class WorkflowRuntime:
                         'name': a.name, 'file_path': a.file_path,
                         'asset_id': a.asset_id, 'mime_type': getattr(a, 'mime_type', ''),
                     } for a in items]
+            # ── ASR: transcribe uploaded voice samples for a richer brief ──
+            if uploaded.get('voice_samples'):
+                try:
+                    from tools.transcription import transcribe_audio
+                    for vs in uploaded['voice_samples']:
+                        fp = vs.get('file_path')
+                        if fp:
+                            vs['transcript'] = transcribe_audio(fp)
+                except Exception as exc:
+                    print(f'  [AssetPrep] ASR enrichment skipped: {exc}')
+
             if uploaded:
                 print(f'  [AssetPrep] Found user uploads: {list(uploaded.keys())}')
         except Exception as exc:
@@ -319,7 +330,7 @@ class WorkflowRuntime:
         get_event_bus().publish(Event(EVENT_PIPELINE_PAUSED, {
             'project_id': project_id, 'review_id': r_asset.review_id, 'stage': 'asset_prep'}))
 
-   def _exec_scene_gen(self, project_id: str, state: WorkflowState, brief: str = '', feedback: str = '') -> None:
+    def _exec_scene_gen(self, project_id: str, state: WorkflowState, brief: str = '', feedback: str = '') -> None:
         """Stage: scene generation (no pause) — cascades to video generation. Accepts optional feedback from review revisions."""
         run_id = 'default'
         lf = get_langfuse()

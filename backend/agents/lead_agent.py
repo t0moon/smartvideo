@@ -76,7 +76,7 @@ class LeadAgent:
         return self._load_prompt(stage_name)
 
     def understand_requirement(self, brief: str, search_context: str = '',
-                               previous_spec: VideoSpec | None = None) -> VideoSpec:
+                                previous_spec: VideoSpec | None = None) -> VideoSpec:
         system = self._build_system('requirement')
         if not system:
             system = 'Extract video specification from the user brief. Return a JSON object.'

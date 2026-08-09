@@ -56,7 +56,7 @@ class TracingMiddleware(AgentMiddleware):
         else:
             metrics.increment('stage.completed', {'stage_id': ctx.stage_id})
             metrics.timing('stage.duration', duration if 'duration' in dir() else 0,
-                           {'stage_id': ctx.stage_id})
+                            {'stage_id': ctx.stage_id})
             logger.info(ctx.project_id, ctx.stage_id,
                         f'Stage completed: {ctx.stage_id}',
                         trace_id=trace_id,

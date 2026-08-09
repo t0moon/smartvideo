@@ -183,7 +183,7 @@ class ContextBuilder:
             final = run_dir / 'final_video.mp4'
             if not final.exists():
                 raw = (ctx.inputs.get('final_video')
-                       or self._read_logical(project_id, run_id, 'final_video') or '')
+                        or self._read_logical(project_id, run_id, 'final_video') or '')
                 if isinstance(raw, dict):
                     p = raw.get('final_video') or raw.get('path') or ''
                 elif isinstance(raw, str):

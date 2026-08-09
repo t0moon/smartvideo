@@ -34,7 +34,7 @@ class AdLawGuardrail(BaseGuardrail):
 
     # 广告法绝对化用语 / 虚假宣传违禁词（中文，与 LLM 产出语言一致）
     _ABSOLUTE_TERMS = ["最好", "最佳", "最优", "第一", "顶级", "国家级", "唯一", "极致",
-                       "史上最", "行业第一", "销量第一", "领导品牌", "领导地位"]
+                        "史上最", "行业第一", "销量第一", "领导品牌", "领导地位"]
     _FORBIDDEN_TERMS = ["虚假", "伪造", "欺骗", "夸大", "绝对", "100%", "百分百", "保证效果"]
 
     def check(self, text: str, context: dict[str, Any] | None = None) -> GuardrailResult:
