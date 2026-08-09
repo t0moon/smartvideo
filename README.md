@@ -16,7 +16,9 @@
 
 > 以下为 SmartVideo 端到端产出示例：输入「15 秒京阿尼风格瑞幸生椰拿铁广告」，经需求理解 → 分镜 → 资产准备 → 场景生成（MiniMax H3）→ 合成配音（SiliconFlow CosyVoice2 温柔女声 `claire`）→ 字幕烧录，最终成片。
 
-<video src="samples/final_with_audio.mp4" controls width="720"></video>
+![SmartVideo 演示](samples/demo.gif)
+
+*GIF 为静音预览，点击下载带语音完整版：* [🎬 final_with_audio.mp4](samples/final_with_audio.mp4)
 
 - 视频原生配乐（MiniMax H3 生成）与女声配音已**混音**共存，而非相互替换
 - 字幕由系统自动生成并烧录进画面
